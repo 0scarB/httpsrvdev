@@ -2,6 +2,6 @@
 
 set -eu
 
-cc -o cli lib.c cli.c
+cc -ggdb -Wall -Werror -o cli lib.c cli.c
 ./cli
 

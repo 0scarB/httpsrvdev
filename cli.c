@@ -12,7 +12,7 @@ void handle_sigint() {
     exit(0);
 }
 
-int main(int argc, char argv[]) {
+int main(int argc, char* argv[]) {
     signal(SIGINT, handle_sigint);
     inst = httpsrvdev_init_begin();
     httpsrvdev_init_end(&inst);
@@ -29,6 +29,16 @@ int main(int argc, char argv[]) {
                 "%s\r\n",
                 strlen(res_content), res_content);
         write(inst.conn_sock_fd, res_buf, 1024);
+        printf("Req method=%d\n", inst.req_method);
+        printf("Req target=%s\n", httpsrvdev_req_slice(&inst, &inst.req_target_slice));
+        for (size_t i = 0; i < inst.req_headers_count; ++i) {
+            printf("    Req header name=%s\n",
+                    httpsrvdev_req_slice(&inst, &inst.req_header_slices[i][0]));
+            printf("    Req header value=%s\n",
+                    httpsrvdev_req_slice(&inst, &inst.req_header_slices[i][1]));
+        }
+        printf("    Req body='%s'\n",
+                httpsrvdev_req_slice(&inst, &inst.req_body_slice));
         httpsrvdev_res_end(&inst);
     }
 
