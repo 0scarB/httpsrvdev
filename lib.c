@@ -12,7 +12,9 @@ struct httpsrvdev_inst httpsrvdev_init_begin() {
         .ip   = (127<<24) | (0<<16) | (0<<8) | (1<<0),
         .port = 8080,
         .listen_sock_fd = -1,
-        .  conn_sock_fd = -1
+        .  conn_sock_fd = -1,
+
+        .res_chunk_len = 0,
     };
 
     return inst;
@@ -222,7 +224,7 @@ static bool parse_req(struct httpsrvdev_inst* inst) {
     return true;
 
 parse_err:
-    inst->err = httpsrvdev_REQ_PARSE_ERR;
+    inst->err = httpsrvdev_CANNOT_PARSE_REQ;
     return false;
 }
 
@@ -241,7 +243,7 @@ bool httpsrvdev_res_begin(struct httpsrvdev_inst* inst) {
 }
 
 bool httpsrvdev_res_end(struct httpsrvdev_inst* inst) {
-    write(inst->conn_sock_fd, inst->res_buf, 2048);
+    write(inst->conn_sock_fd, inst->res_chunk_buf, 2048);
     close(inst->conn_sock_fd);
     inst->conn_sock_fd = -1;
 
@@ -271,5 +273,75 @@ char* httpsrvdev_req_slice(struct httpsrvdev_inst* inst, uint16_t(*slice)[2]) {
     strncpy(ptr, httpsrvdev_req_slice_start(inst, slice), len);
 
     return ptr;
+}
+
+bool httpsrvdev_res_chunk_write_n(struct httpsrvdev_inst* inst, char* str, size_t n) {
+    size_t res_chunk_len_after_write = inst->res_chunk_len + n;
+    if (res_chunk_len_after_write > 2048) {
+        inst->err = httpsrvdev_EXCEEDED_MAX_RES_CHUNK_SIZE;
+        return false;
+    }
+
+    strncpy(inst->res_chunk_buf + inst->res_chunk_len, str, n);
+    inst->res_chunk_len = res_chunk_len_after_write;
+
+    return true;
+}
+
+bool httpsrvdev_res_chunk_send(struct httpsrvdev_inst* inst) {
+    write(inst->conn_sock_fd, inst->res_chunk_buf, inst->res_chunk_len);
+    inst->res_chunk_len = 0;
+
+    return true;
+}
+
+bool httpsrvdev_res_send_n(struct httpsrvdev_inst* inst, char* str, size_t n) {
+    while (n > 2048) {
+        if (!httpsrvdev_res_chunk_write_n(inst, str, 2048)) return false;
+        if (!httpsrvdev_res_chunk_send(inst))               return false;
+        str += 2048;
+        n   -= 2048;
+    }
+    if (n > 0) {
+        if (!httpsrvdev_res_chunk_write_n(inst, str, n))    return false;
+        if (!httpsrvdev_res_chunk_send(inst))               return false;
+    }
+
+    return true;
+}
+
+bool httpsrvdev_res_send(struct httpsrvdev_inst* inst, char* str) {
+    return httpsrvdev_res_send_n(inst, str, strlen(str));
+}
+
+bool httpsrvdev_res_status_line(struct httpsrvdev_inst* inst, int status) {
+    if (!httpsrvdev_res_send(inst, "HTTP/1.1 ")) return false;
+    char status_buf[4];
+    sprintf(status_buf, "%d", status);
+    if (!httpsrvdev_res_send(inst, status_buf))  return false;
+    if (!httpsrvdev_res_send(inst, "\r\n"))      return false;
+
+    return true;
+}
+
+bool httpsrvdev_res_header(struct httpsrvdev_inst* inst, char* name, char* value) {
+    if (!httpsrvdev_res_send(inst, name))   return false;
+    if (!httpsrvdev_res_send(inst, ": "))   return false;
+    if (!httpsrvdev_res_send(inst, value))  return false;
+    if (!httpsrvdev_res_send(inst, "\r\n")) return false;
+
+    return true;
+}
+
+bool httpsrvdev_res_body(struct httpsrvdev_inst* inst, char* body) {
+    char content_len_value_buf[20];
+    sprintf(content_len_value_buf, "%ld", strlen(body));
+    if (!httpsrvdev_res_header(inst, "Content-Length", content_len_value_buf))
+        return false;
+    if (!httpsrvdev_res_send(inst, "\r\n")) return false;
+    if (!httpsrvdev_res_send(inst, body))   return false;
+    if (!httpsrvdev_res_send(inst, "\r\n")) return false;
+
+    return true;
 }
 
