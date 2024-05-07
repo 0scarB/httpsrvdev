@@ -634,3 +634,51 @@ char* httpsrvdev_file_mime_type(struct httpsrvdev_inst* inst, char* file_path) {
     return inst->default_file_mime_type;
 }
 
+bool httpsrvdev_routes_listing_begin(struct httpsrvdev_inst* inst) {
+    inst->listing_res_content_len = 0;
+    memcpy(inst->listing_res_content + inst->listing_res_content_len,
+            "<!DOCTYPE html>\n"
+            "<html><body style=\"background-color:#000;margin:2em\">\n", 70);
+    inst->listing_res_content_len += 70;
+
+    return true;
+}
+
+bool httpsrvdev_routes_listing_entry(struct httpsrvdev_inst* inst,
+    char* path, char* link_text
+) {
+    memcpy(inst->listing_res_content + inst->listing_res_content_len,
+            "<a style=\"color:#FFF;text-decoration:underline;"
+            "display:block;margin-bottom:0.5em\" href=\"", 87);
+    inst->listing_res_content_len += 87;
+
+    size_t path_len = strlen(path);
+    memcpy(inst->listing_res_content + inst->listing_res_content_len, path, path_len);
+    inst->listing_res_content_len += path_len;
+
+    memcpy(inst->listing_res_content + inst->listing_res_content_len, "\">", 2);
+    inst->listing_res_content_len += 2;
+
+    size_t link_text_len = strlen(link_text);
+    memcpy(inst->listing_res_content + inst->listing_res_content_len,
+            link_text, link_text_len);
+    inst->listing_res_content_len += link_text_len;
+
+    memcpy(inst->listing_res_content + inst->listing_res_content_len, "</a>\n", 5);
+    inst->listing_res_content_len += 5;
+
+    return true;
+}
+
+bool httpsrvdev_routes_listing_end(struct httpsrvdev_inst* inst) {
+    memcpy(inst->listing_res_content + inst->listing_res_content_len, "</body></html>", 14);
+    inst->listing_res_content_len += 14;
+    inst->listing_res_content[inst->listing_res_content_len] = '\0';
+
+    if (!httpsrvdev_res_status_line(inst, 200                        )) return false;
+    if (!httpsrvdev_res_header     (inst, "Content-Type", "text/html")) return false;
+    if (!httpsrvdev_res_body       (inst, inst->listing_res_content  )) return false;
+
+    return true;
+}
+
