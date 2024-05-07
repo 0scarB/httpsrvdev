@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,12 +20,6 @@ int main(int argc, char* argv[]) {
 
     httpsrvdev_start(&inst);
     while (httpsrvdev_res_begin(&inst)) {
-        httpsrvdev_res_status_line(&inst, 200);
-        httpsrvdev_res_header     (&inst, "Content-Type", "text/html");
-        httpsrvdev_res_body       (&inst, "<h1>Hello, World!</h1>");
-
-        printf("Req method=%d\n", inst.req_method);
-        printf("Req target=%s\n", httpsrvdev_req_slice(&inst, &inst.req_target_slice));
         for (size_t i = 0; i < inst.req_headers_count; ++i) {
             printf("    Req header name=%s\n",
                     httpsrvdev_req_slice(&inst, &inst.req_header_slices[i][0]));
@@ -33,7 +28,29 @@ int main(int argc, char* argv[]) {
         }
         printf("    Req body='%s'\n",
                 httpsrvdev_req_slice(&inst, &inst.req_body_slice));
-        httpsrvdev_res_end(&inst);
+        printf("Req method=%d\n", inst.req_method);
+        printf("Req target=%s\n", httpsrvdev_req_slice(&inst, &inst.req_target_slice));
+
+        char* file_path = argv[1];
+        if (!httpsrvdev_res_with_file(&inst, file_path)) {
+            if (inst.err & httpsrvdev_COULD_NOT_OPEN_FILE) {
+                if ((inst.err & httpsrvdev_ERRNO) == ENOENT) {
+                    char* res_content = "File not found!";
+                    httpsrvdev_res_status_line(&inst, 404);
+                    httpsrvdev_res_header     (&inst, "Content-Type"  , "text/plain");
+                    httpsrvdev_res_headerf    (&inst, "Content-Length", "%d",
+                                                      strlen(res_content));
+                    httpsrvdev_res_body       (&inst, res_content);
+                } else {
+                    char* res_content = "Internal server error!";
+                    httpsrvdev_res_status_line(&inst, 500);
+                    httpsrvdev_res_header     (&inst, "Content-Type"  , "text/plain");
+                    httpsrvdev_res_headerf    (&inst, "Content-Length", "%d",
+                                                      strlen(res_content));
+                    httpsrvdev_res_body       (&inst, res_content);
+                }
+            }
+        }
     }
 
     return EXIT_SUCCESS;
