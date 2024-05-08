@@ -24,6 +24,8 @@
 #define httpsrvdev_COULD_NOT_OPEN_DIR                (int64_t) 0x0410000
 #define httpsrvdev_COULD_NOT_STAT                    (int64_t) 0x0411000
 #define httpsrvdev_UNHANDLED_FILE_TYPE               (int64_t) 0x0412000
+#define httpsrvdev_INVALID_IP                        (int64_t) 0x0800000
+#define httpsrvdev_INVALID_PORT                      (int64_t) 0x0810000
 #define httpsrvdev_LIB_IMPL_ERR                      (int64_t) 0x8000000
 #define httpsrvdev_MASK_ERRNO                        (int64_t) 0x0000FFF
 #define httpsrvdev_MASK_FILE_TYPE                    (int64_t) 0x0000FFF
@@ -31,7 +33,7 @@
 struct httpsrvdev_inst {
     int err;
 
-    int ip;
+    uint32_t ip;
     int port;
     int listen_sock_fd;
     int   conn_sock_fd;
@@ -81,7 +83,11 @@ bool     httpsrvdev_res_file_sys_entry(struct httpsrvdev_inst* inst, char* path)
 bool     httpsrvdev_res_listing_begin (struct httpsrvdev_inst* inst);
 bool     httpsrvdev_res_listing_entry (struct httpsrvdev_inst* inst,
                                            char* path, char* link_text);
-bool     httpsrvdev_res_listing_end  (struct httpsrvdev_inst* inst);
+bool     httpsrvdev_res_listing_end   (struct httpsrvdev_inst* inst);
 uint64_t httpsrvdev_file_encode_ext   (struct httpsrvdev_inst* inst, char* file_path);
 char*    httpsrvdev_file_mime_type    (struct httpsrvdev_inst* inst, char* file_path);
+bool     httpsrvdev_ipv4_from_str     (struct httpsrvdev_inst* inst, char* str);
+int64_t  httpsrvdev_ipv4_parse        (struct httpsrvdev_inst* inst, char* str);
+bool     httpsrvdev_port_from_str     (struct httpsrvdev_inst* inst, char* str);
+int      httpsrvdev_port_parse        (struct httpsrvdev_inst* inst, char* str);
 

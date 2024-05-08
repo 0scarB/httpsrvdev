@@ -731,6 +731,72 @@ char* httpsrvdev_file_mime_type(struct httpsrvdev_inst* inst, char* file_path) {
     return inst->default_file_mime_type;
 }
 
+bool httpsrvdev_ipv4_from_str(struct httpsrvdev_inst* inst, char* str) {
+    int64_t ip = httpsrvdev_ipv4_parse(inst, str);
+    if (ip == -1) {
+        return false;
+    }
+    inst->ip = ip;
+    return true;
+}
+
+int64_t httpsrvdev_ipv4_parse(struct httpsrvdev_inst* inst, char* str) {
+    int64_t ip = 0;
+
+    int64_t i = strlen(str);
+    for (size_t j = 0; j < 4; ++j) {
+        if (--i < 0) goto err;
+
+        int64_t byte = 0;
+        for (int64_t decimal_exp = 1; decimal_exp < 1001; decimal_exp *= 10) {
+            if (decimal_exp > 100)                 goto err;
+            if (!('0' <= str[i] && str[i] <= '9')) goto err;
+
+            byte += decimal_exp*(str[i--] - '0');
+
+            if (byte > 255)                        goto err;
+            if (str[i] == '.')                     break;
+            if (i < 0)                             break;
+        }
+        ip |= (byte << (8*j));
+    }
+
+    return ip;
+
+err:
+    inst->err = httpsrvdev_INVALID_IP;
+    return -1;
+}
+
+bool httpsrvdev_port_from_str(struct httpsrvdev_inst* inst, char* str) {
+    int port = httpsrvdev_port_parse(inst, str);
+    if (port == -1) {
+        return false;
+    }
+    inst->port = port;
+    return true;
+}
+
+int httpsrvdev_port_parse(struct httpsrvdev_inst* inst, char* str) {
+    int port = 0;
+    int decimal_exp = 1;
+    for (int i = strlen(str) - 1; i > -1; --i) {
+        if (!('0' <= str[i] && str[i] <= '9')) goto err;
+
+        port += decimal_exp*(str[i] - '0');
+
+        if (port > 0xFFFF)                     goto err;
+
+        decimal_exp *= 10;
+    } 
+
+    return port;
+
+err:
+    inst->err = httpsrvdev_INVALID_PORT;
+    return -1;
+}
+
 // General TODOs:
 // - Add err_msg to inst and set err_msg at each error site
 // - Revaluate use of fixed sized buffers ->
