@@ -39,10 +39,10 @@ int main(int argc, char* argv[]) {
                                               strlen(res_content));
             httpsrvdev_res_body       (&inst, res_content);
         } else if (argc == 2) {
-            char* file_path = argv[1];
-            if (!httpsrvdev_res_with_file(&inst, file_path)) {
+            char* path = argv[1];
+            if (!httpsrvdev_res_file_sys_entry(&inst, path)) {
                 if (inst.err & httpsrvdev_COULD_NOT_OPEN_FILE) {
-                    if ((inst.err & httpsrvdev_ERRNO) == ENOENT) {
+                    if ((inst.err & httpsrvdev_MASK_ERRNO) == ENOENT) {
                         char* res_content = "File not found!";
                         httpsrvdev_res_status_line(&inst, 404);
                         httpsrvdev_res_header     (&inst, "Content-Type"  , "text/plain");
@@ -60,12 +60,12 @@ int main(int argc, char* argv[]) {
                 }
             }
         } else if (argc > 2) {
-            httpsrvdev_routes_listing_begin(&inst);
+            httpsrvdev_res_listing_begin(&inst);
             for (size_t arg_i = 1; arg_i < argc; ++arg_i) {
                 char* path = argv[arg_i];
-                httpsrvdev_routes_listing_entry(&inst, path, path);
+                httpsrvdev_res_listing_entry(&inst, path, path);
             }
-            httpsrvdev_routes_listing_end(&inst);
+            httpsrvdev_res_listing_end(&inst);
         }
     }
 

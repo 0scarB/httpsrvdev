@@ -1,3 +1,4 @@
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -5,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include "lib.h"
 
@@ -350,26 +352,27 @@ bool httpsrvdev_res_body(struct httpsrvdev_inst* inst, char* body) {
     return true;
 }
 
-bool httpsrvdev_res_with_file(struct httpsrvdev_inst* inst, char* path) {
+bool httpsrvdev_res_file(struct httpsrvdev_inst* inst, char* path) {
     char* mime_type = httpsrvdev_file_mime_type(inst, path);
 
     int fd = open(path, O_RDONLY);
     if (fd == -1) {
-        inst->err = httpsrvdev_COULD_NOT_OPEN_FILE | errno;
+        inst->err = httpsrvdev_COULD_NOT_OPEN_FILE | (errno & httpsrvdev_MASK_ERRNO);
         return false;
     }
 
     if (lseek(fd, 0, SEEK_SET) == -1) {
-        inst->err = httpsrvdev_FILE_ERR;
+        inst->err = httpsrvdev_FILE_SYS_ERR | (errno & httpsrvdev_MASK_ERRNO);
         return false;
     }
     int content_length = lseek(fd, 0, SEEK_END);
     if (content_length == -1) {
-        inst->err = httpsrvdev_COULD_NOT_GET_FILE_CONTENT_LENGTH | errno;
+        inst->err = httpsrvdev_COULD_NOT_GET_FILE_CONTENT_LENGTH |
+                    (errno & httpsrvdev_MASK_ERRNO);
         return false;
     }
     if (lseek(fd, 0, SEEK_SET) == -1) {
-        inst->err = httpsrvdev_FILE_ERR;
+        inst->err = httpsrvdev_FILE_SYS_ERR | (errno & httpsrvdev_MASK_ERRNO);
         return false;
     }
 
@@ -383,12 +386,12 @@ bool httpsrvdev_res_with_file(struct httpsrvdev_inst* inst, char* path) {
     // TODO: Read and send in chunks
     char file_content_buf[content_length];
     if (read(fd, file_content_buf, 2048) == -1) {
-        inst->err = httpsrvdev_COULD_NOT_READ_FILE | errno;
+        inst->err = httpsrvdev_COULD_NOT_READ_FILE | (errno & httpsrvdev_MASK_ERRNO);
         return false;
     }
 
     if (close(fd) == -1) {
-        inst->err = httpsrvdev_COULD_NOT_CLOSE_FILE | errno;
+        inst->err = httpsrvdev_COULD_NOT_CLOSE_FILE | (errno & httpsrvdev_MASK_ERRNO);
         return false;
     }
 
@@ -397,6 +400,100 @@ bool httpsrvdev_res_with_file(struct httpsrvdev_inst* inst, char* path) {
     if (!httpsrvdev_res_send_n(inst, "\r\n"          , 2             )) return false;
 
     if (!httpsrvdev_res_end(inst)) return false;
+
+    return true;
+}
+
+bool httpsrvdev_res_dir(struct httpsrvdev_inst* inst, char* dir_path) {
+    char  entry_path_buf[512];
+    char* entry_name_in_path_start = stpcpy(entry_path_buf, dir_path);
+    if (*(entry_name_in_path_start - 1) != '/') {
+        *entry_name_in_path_start = '/';
+        ++entry_name_in_path_start;
+    }
+
+    httpsrvdev_res_listing_begin(inst);
+    struct dirent** entries;
+    int n_entries = scandir(dir_path, &entries, NULL, alphasort);
+    if (n_entries == -1) {
+        inst->err = httpsrvdev_COULD_NOT_OPEN_DIR | (errno & httpsrvdev_MASK_ERRNO);
+        return false;
+    }
+    printf("%s -\n", entry_path_buf);
+    for (size_t i = 0; i < n_entries; ++i) {
+        char* entry_name = entries[i]->d_name;
+        strcpy(entry_name_in_path_start, entry_name);
+        printf("%s %s\n", entry_path_buf, entry_name);
+        httpsrvdev_res_listing_entry(inst, entry_path_buf, entry_name);
+    }
+    httpsrvdev_res_listing_end(inst);
+
+    return true;
+}
+
+bool httpsrvdev_res_file_sys_entry(struct httpsrvdev_inst* inst, char* path) {
+    struct stat path_stat;
+    if (stat(path, &path_stat) == -1) {
+        inst->err = httpsrvdev_COULD_NOT_STAT | (errno & httpsrvdev_MASK_ERRNO);
+        return false;
+    }
+
+    int file_type = path_stat.st_mode & S_IFMT;
+    switch (file_type) {
+        case S_IFREG:
+            return httpsrvdev_res_file(inst, path);
+        case S_IFDIR:
+            return httpsrvdev_res_dir(inst, path);
+    }
+
+    inst->err = httpsrvdev_UNHANDLED_FILE_TYPE | (file_type & httpsrvdev_MASK_FILE_TYPE);
+    return false;
+}
+
+bool httpsrvdev_res_listing_begin(struct httpsrvdev_inst* inst) {
+    inst->listing_res_content_len = 0;
+    memcpy(inst->listing_res_content + inst->listing_res_content_len,
+            "<!DOCTYPE html>\n"
+            "<html><body style=\"background-color:#000;margin:2em\">\n", 70);
+    inst->listing_res_content_len += 70;
+
+    return true;
+}
+
+bool httpsrvdev_res_listing_entry(struct httpsrvdev_inst* inst,
+    char* path, char* link_text
+) {
+    memcpy(inst->listing_res_content + inst->listing_res_content_len,
+            "<a style=\"color:#FFF;text-decoration:underline;"
+            "display:block;margin-bottom:0.5em\" href=\"", 88);
+    inst->listing_res_content_len += 88;
+
+    size_t path_len = strlen(path);
+    memcpy(inst->listing_res_content + inst->listing_res_content_len, path, path_len);
+    inst->listing_res_content_len += path_len;
+
+    memcpy(inst->listing_res_content + inst->listing_res_content_len, "\">", 2);
+    inst->listing_res_content_len += 2;
+
+    size_t link_text_len = strlen(link_text);
+    memcpy(inst->listing_res_content + inst->listing_res_content_len,
+            link_text, link_text_len);
+    inst->listing_res_content_len += link_text_len;
+
+    memcpy(inst->listing_res_content + inst->listing_res_content_len, "</a>\n", 5);
+    inst->listing_res_content_len += 5;
+
+    return true;
+}
+
+bool httpsrvdev_res_listing_end(struct httpsrvdev_inst* inst) {
+    memcpy(inst->listing_res_content + inst->listing_res_content_len, "</body></html>", 14);
+    inst->listing_res_content_len += 14;
+    inst->listing_res_content[inst->listing_res_content_len] = '\0';
+
+    if (!httpsrvdev_res_status_line(inst, 200                        )) return false;
+    if (!httpsrvdev_res_header     (inst, "Content-Type", "text/html")) return false;
+    if (!httpsrvdev_res_body       (inst, inst->listing_res_content  )) return false;
 
     return true;
 }
@@ -597,7 +694,7 @@ static char* mime_types[] = {
     "application/vnd.visio",
 };
 
-uint64_t httpsrvdev_encode_file_ext(struct httpsrvdev_inst* inst, char* file_path) {
+uint64_t httpsrvdev_file_encode_ext(struct httpsrvdev_inst* inst, char* file_path) {
     uint64_t encoding = 0;
     size_t path_len = strlen(file_path);
     for (size_t i = 0; i < path_len; ++i) {
@@ -615,7 +712,7 @@ uint64_t httpsrvdev_encode_file_ext(struct httpsrvdev_inst* inst, char* file_pat
 }
 
 char* httpsrvdev_file_mime_type(struct httpsrvdev_inst* inst, char* file_path) {
-    uint64_t ext_encoding = httpsrvdev_encode_file_ext(inst, file_path);
+    uint64_t ext_encoding = httpsrvdev_file_encode_ext(inst, file_path);
     if (ext_encoding == 0) {
         if (inst->default_file_mime_type[0] == '\0') {
             inst->err = httpsrvdev_FILE_HAS_NO_EXT;
@@ -634,51 +731,10 @@ char* httpsrvdev_file_mime_type(struct httpsrvdev_inst* inst, char* file_path) {
     return inst->default_file_mime_type;
 }
 
-bool httpsrvdev_routes_listing_begin(struct httpsrvdev_inst* inst) {
-    inst->listing_res_content_len = 0;
-    memcpy(inst->listing_res_content + inst->listing_res_content_len,
-            "<!DOCTYPE html>\n"
-            "<html><body style=\"background-color:#000;margin:2em\">\n", 70);
-    inst->listing_res_content_len += 70;
-
-    return true;
-}
-
-bool httpsrvdev_routes_listing_entry(struct httpsrvdev_inst* inst,
-    char* path, char* link_text
-) {
-    memcpy(inst->listing_res_content + inst->listing_res_content_len,
-            "<a style=\"color:#FFF;text-decoration:underline;"
-            "display:block;margin-bottom:0.5em\" href=\"", 87);
-    inst->listing_res_content_len += 87;
-
-    size_t path_len = strlen(path);
-    memcpy(inst->listing_res_content + inst->listing_res_content_len, path, path_len);
-    inst->listing_res_content_len += path_len;
-
-    memcpy(inst->listing_res_content + inst->listing_res_content_len, "\">", 2);
-    inst->listing_res_content_len += 2;
-
-    size_t link_text_len = strlen(link_text);
-    memcpy(inst->listing_res_content + inst->listing_res_content_len,
-            link_text, link_text_len);
-    inst->listing_res_content_len += link_text_len;
-
-    memcpy(inst->listing_res_content + inst->listing_res_content_len, "</a>\n", 5);
-    inst->listing_res_content_len += 5;
-
-    return true;
-}
-
-bool httpsrvdev_routes_listing_end(struct httpsrvdev_inst* inst) {
-    memcpy(inst->listing_res_content + inst->listing_res_content_len, "</body></html>", 14);
-    inst->listing_res_content_len += 14;
-    inst->listing_res_content[inst->listing_res_content_len] = '\0';
-
-    if (!httpsrvdev_res_status_line(inst, 200                        )) return false;
-    if (!httpsrvdev_res_header     (inst, "Content-Type", "text/html")) return false;
-    if (!httpsrvdev_res_body       (inst, inst->listing_res_content  )) return false;
-
-    return true;
-}
+// General TODOs:
+// - Add err_msg to inst and set err_msg at each error site
+// - Revaluate use of fixed sized buffers ->
+//     1. Could they be too small/large in cases
+//     2. Are there better alternatives
+// - Replace "while true" loops with bounded loops
 
