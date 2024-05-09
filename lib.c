@@ -320,9 +320,9 @@ bool httpsrvdev_res_status_line(struct httpsrvdev_inst* inst, int status) {
 }
 
 bool httpsrvdev_res_header(struct httpsrvdev_inst* inst, char* name, char* value) {
-    if (!httpsrvdev_res_send(inst, name))   return false;
-    if (!httpsrvdev_res_send(inst, ": "))   return false;
-    if (!httpsrvdev_res_send(inst, value))  return false;
+    if (!httpsrvdev_res_send(inst, name  )) return false;
+    if (!httpsrvdev_res_send(inst, ": "  )) return false;
+    if (!httpsrvdev_res_send(inst, value )) return false;
     if (!httpsrvdev_res_send(inst, "\r\n")) return false;
 
     return true;
@@ -344,7 +344,7 @@ bool httpsrvdev_res_body(struct httpsrvdev_inst* inst, char* body) {
     if (!httpsrvdev_res_header(inst, "Content-Length", content_len_value_buf))
         return false;
     if (!httpsrvdev_res_send(inst, "\r\n")) return false;
-    if (!httpsrvdev_res_send(inst, body))   return false;
+    if (!httpsrvdev_res_send(inst, body  )) return false;
     if (!httpsrvdev_res_send(inst, "\r\n")) return false;
 
     if (!httpsrvdev_res_end(inst)) return false;

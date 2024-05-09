@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <stdarg.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,20 +7,99 @@
 #include <unistd.h>
 #include "lib.h"
 
+#define INFO 1
+#define WARN 2
+#define ERR  3
+
 char   cli_args        [16][256];
 bool   cli_args_handled[16];
 size_t cli_args_count;
 char usage_msg[2048];
 
-int cli_args_find_unhandled_idx(char* arg) {
-    for (size_t i = 0; i < cli_args_count; ++i) {
+void log_(int log_level, char* msg) {
+    FILE* out_file = NULL;
+    size_t prefix_len = 20;
+    char prefix[prefix_len];
+    switch (log_level) {
+        case INFO:
+            out_file = stdout;
+            memcpy(prefix, "(httpsrvdev) INFO : ", prefix_len);
+            break;
+        case WARN:
+            out_file = stderr;
+            memcpy(prefix, "(httpsrvdev) WARN : ", prefix_len);
+            break;
+        case ERR:
+            out_file = stderr;
+            memcpy(prefix, "(httpsrvdev) ERROR: ", prefix_len);
+            break;
+        default:
+            perror("Unexpected Implementation Error: "
+                    "Unexpected log level!");
+            exit(1);
+    }
+    fwrite(prefix, prefix_len, 1, out_file);
+    fputs(msg, out_file);
+    fputc('\n', out_file);
+    fflush(out_file);
+}
+
+void log_fmt(int log_level, char* fmt, ...) {
+    va_list sprintf_args;
+    va_start(sprintf_args, fmt);
+    char msg_buf[1024];
+    vsprintf(msg_buf, fmt, sprintf_args);
+    va_end(sprintf_args);
+
+    log_(log_level, msg_buf);
+}
+
+int cli_args_find_unhandled_idx(char* short_arg, char* long_arg) {
+    // Iterate through args backwards so the latter args override
+    // former when duplicates are allowed.
+    for (int i = cli_args_count - 1; i > -1; --i) {
         if (cli_args_handled[i]) continue;
 
-        if (strcmp(arg, cli_args[i]) == 0) {
+        if (strcmp(long_arg, cli_args[i]) == 0 ||
+            (short_arg != NULL && strcmp(short_arg, cli_args[i]) == 0)
+        ) {
             return i;
         }
     }
     return -1;
+}
+
+void cli_args_err_on_duplicate_opts_or_flags(void) {
+    char* possible_duplicate_opts[][2] = {
+        {NULL, "--ip"  },
+        {"-p", "--port"},
+        {"-h", "--help"},
+        // Not checked: {NULL, "--override-opts"},
+    };
+    for (size_t i = 0;
+         i < sizeof(possible_duplicate_opts)/sizeof(possible_duplicate_opts[0]);
+         ++i
+    ) {
+        char* short_opt = possible_duplicate_opts[i][0];
+        char*  long_opt = possible_duplicate_opts[i][1];
+
+        int count = 0;
+        for (size_t j = 0; j < cli_args_count; ++j) {
+            char* arg = cli_args[j];
+            if (strcmp( long_opt, arg) == 0 ||
+                (short_opt != NULL && strcmp(short_opt, arg) == 0)
+            ) {
+                if (++count > 1) {
+                    if (short_opt != NULL) {
+                        log_fmt(ERR, "Duplicate option/flag '%s/%s'!", short_opt, long_opt);
+                    } else {
+                        log_fmt(ERR, "Duplicate option/flag '%s'!", long_opt);
+                    }
+                    exit(1);
+                }
+            }
+        }
+    }
 }
 
 struct httpsrvdev_inst inst;
@@ -30,41 +110,62 @@ void handle_sigint() {
 }
 
 int main(int argc, char* argv[]) {
+    // Populate globals
     for (size_t i = 0; i < argc; ++i) {
         strcpy(cli_args[i], argv[i]);
         cli_args_handled[i] = false;
     }
     cli_args_count = argc;
 
+    // Determine the executable's name from the first CLI arg
     char* this_exe_name = cli_args[0];
     cli_args_handled[0] = true;
 
     sprintf(usage_msg,
-            "%s [OPTIONS] [PATH]\n"
+            "%s [OPTIONS/FLAGS] [PATH]\n"
             "\n"
             "Serve files and directories via HTTP.\n"
             "For non-deployment (a.k.a. non-production) software development.\n"
             "\n"
-            "PATH ............. Path to the directory or file being served.\n"
+            "[PATH] ........... Set the path to the directory or file being served.\n"
             "                   Default \".\" / CWD (current working directory).\n"
-            "OPTIONS\n"
-            "--ip ADDRESS ..... The server's IPv4 address. Default \"127.0.0.1\".\n"
-            "-p/--port PORT ... The server's port. Default \"8080\".\n"
-            "-h/--help ........ Display this usage message.",
+            "[OPTIONS/FLAGS]\n"
+            "--ip ADDRESS ..... Set the server's IPv4 address. Default \"127.0.0.1\".\n"
+            "-p/--port PORT ... Set the server's port. Default \"8080\".\n"
+            "-h/--help ........ Display this usage message.\n"
+            "--override-opts .. Allow the last duplicate or a flag or option to\n"
+            "                   override the first. If not provided, duplicates will\n"
+            "                   causes an error.\n"
+            "                       This flag is useful in scripts when you want to\n"
+            "                       use different defaults and still provide the\n"
+            "                       ability to override your new defaults from the\n"
+            "                       command line, when calling the script.\n"
+            "                       E.g. a bash script containing:\n"
+            "                            httpsrvdev --port 9000 $@\n"
+            "                       allows the caller to override the port:\n"
+            "                            $ ./my-script --port 9001",
             this_exe_name);
 
-    if (cli_args_find_unhandled_idx("-h"    ) != -1 ||
-        cli_args_find_unhandled_idx("--help") != -1
-    ) {
+    // Dsiplay the usage message if -h or --help are provided anywhere in the
+    // CLI args
+    if (cli_args_find_unhandled_idx("-h", "--help") != -1) {
         puts(usage_msg);
         return EXIT_SUCCESS;
+    }
+
+    // Check for duplicate CLI args if --override-opts is not provided
+    int override_opts_flag_idx = cli_args_find_unhandled_idx(NULL, "--override-opts");
+    if (override_opts_flag_idx == -1) {
+        cli_args_err_on_duplicate_opts_or_flags();
+    } else {
+        cli_args_handled[override_opts_flag_idx] = true;
     }
 
     inst = httpsrvdev_init_begin();
     signal(SIGINT, handle_sigint);
 
     // Check for and handle IPv4 CLI option
-    int ip_opt_idx = cli_args_find_unhandled_idx("--ip");
+    int ip_opt_idx = cli_args_find_unhandled_idx(NULL, "--ip");
     if (ip_opt_idx != -1) {
         int ip_val_idx = ip_opt_idx + 1;
         if (ip_val_idx >= cli_args_count) {
@@ -80,10 +181,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Check for and handle port CLI option
-    int port_opt_idx = cli_args_find_unhandled_idx("-p");
-    if (port_opt_idx == -1) {
-        port_opt_idx = cli_args_find_unhandled_idx("--port");
-    }
+    int port_opt_idx = cli_args_find_unhandled_idx("-p", "--port");
     if (port_opt_idx != -1) {
         int port_val_idx = port_opt_idx + 1;
         if (port_val_idx >= cli_args_count) {
