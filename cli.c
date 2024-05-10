@@ -14,7 +14,7 @@
 char   cli_args        [16][256];
 bool   cli_args_handled[16];
 size_t cli_args_count;
-char usage_msg[2048];
+char usage_msg[4096];
 
 void log_(int log_level, char* msg) {
     FILE* out_file = NULL;
@@ -122,29 +122,41 @@ int main(int argc, char* argv[]) {
     cli_args_handled[0] = true;
 
     sprintf(usage_msg,
-            "%s [OPTIONS/FLAGS] [PATH]\n"
-            "\n"
-            "Serve files and directories via HTTP.\n"
-            "For non-deployment (a.k.a. non-production) software development.\n"
-            "\n"
-            "[PATH] ........... Set the path to the directory or file being served.\n"
-            "                   Default \".\" / CWD (current working directory).\n"
-            "[OPTIONS/FLAGS]\n"
-            "--ip ADDRESS ..... Set the server's IPv4 address. Default \"127.0.0.1\".\n"
-            "-p/--port PORT ... Set the server's port. Default \"8080\".\n"
-            "-h/--help ........ Display this usage message.\n"
-            "--override-opts .. Allow the last duplicate or a flag or option to\n"
-            "                   override the first. If not provided, duplicates will\n"
-            "                   causes an error.\n"
-            "                       This flag is useful in scripts when you want to\n"
-            "                       use different defaults and still provide the\n"
-            "                       ability to override your new defaults from the\n"
-            "                       command line, when calling the script.\n"
-            "                       E.g. a bash script containing:\n"
-            "                            httpsrvdev --port 9000 $@\n"
-            "                       allows the caller to override the port:\n"
-            "                            $ ./my-script --port 9001",
-            this_exe_name);
+        "%s [OPTIONS/FLAGS] [PATH1 PATH2 ...]\n"
+        "\n"
+        "Serve files and directories via HTTP.\n"
+        "For non-deployment (a.k.a. non-production) software development.\n"
+        "\n"
+        "[PATH1 PATH2 ...] .... A list of 0 or more PATHs to files or directories to\n"
+        "                       serve.\n"
+        "                           If 0 PATHs are provided, the CWD (current working\n"
+        "                           directory) will be served.\n"
+        "                           If 1 PATH is is provided, only that PATH will be\n"
+        "                           served.\n"
+        "                           If multiple PATHs are provided, a listing that\n"
+        "                           links to each PATH will be served.\n"
+        "                           Paths to directories will serve the HTML page\n"
+        "                           'index.html' or 'index.htm' if contained within\n"
+        "                           directory; otherwise, a directory listing will be\n"
+        "                           served.\n"
+        "[OPTIONS/FLAGS]\n"
+        "--ip ADDRESS ......... Set the server's IPv4 address. Default \"127.0.0.1\".\n"
+        "-p/--port PORT ....... Set the server's port.         Default \"8080\".\n"
+        "-h/--help ............ Display this usage message.\n"
+        "--override-opts ...... Allow the last duplicate of a flag or option to\n"
+        "                       override the first. If not provided, duplicates will\n"
+        "                       causes an error. When provided this flag additionally\n"
+        "                       allows duplicate flags and options to be provided\n"
+        "                       after the PATHs list.\n"
+        "                           This flag is useful in scripts when you want to\n"
+        "                           use different defaults and still provide the\n"
+        "                           ability to override your new defaults from the\n"
+        "                           command line, when calling the script.\n"
+        "                           E.g. a bash script containing:\n"
+        "                                httpsrvdev --port 9000 $@\n"
+        "                           allows the caller to override the port:\n"
+        "                                $ ./my-script --port 9001",
+        this_exe_name);
 
     // Dsiplay the usage message if -h or --help are provided anywhere in the
     // CLI args
@@ -198,55 +210,73 @@ int main(int argc, char* argv[]) {
 
     httpsrvdev_init_end(&inst);
 
-    httpsrvdev_start(&inst);
-    while (httpsrvdev_res_begin(&inst)) {
-        for (size_t i = 0; i < inst.req_headers_count; ++i) {
-            printf("    Req header name=%s\n",
-                    httpsrvdev_req_slice(&inst, &inst.req_header_slices[i][0]));
-            printf("    Req header value=%s\n",
-                    httpsrvdev_req_slice(&inst, &inst.req_header_slices[i][1]));
+    // Assume that remaining unhandled args are PATHs and check that
+    // all path args are at the end unless --override-opts is provided.
+    bool   cli_args_is_path[sizeof(cli_args)/sizeof(cli_args[0])];
+    size_t cli_args_paths_count = 0;
+    bool last_was_handled = false;
+    if (override_opts_flag_idx == -1) {
+        for (int i = cli_args_count - 1; i > -1; --i) {
+            if (cli_args_handled[i]) {
+                last_was_handled = true;
+            } else {
+                if (last_was_handled) {
+                    log_fmt(ERR, "PATH arguments must all come at the end, "
+                                 "after options and flags (unless --override-opts "
+                                 "is provided). Non-option/-flag argument "
+                                 "'%s' comes before option/flag '%s'!",
+                                 cli_args[i], cli_args[i + 1]);
+                    return EXIT_FAILURE;
+                }
+                cli_args_is_path[i] = true;
+                ++cli_args_paths_count;
+            }
         }
-        printf("    Req body='%s'\n",
-                httpsrvdev_req_slice(&inst, &inst.req_body_slice));
-        printf("Req method=%d\n", inst.req_method);
-        printf("Req target=%s\n", httpsrvdev_req_slice(&inst, &inst.req_target_slice));
+    } else {
+        for (size_t i = 0; i < cli_args_count; ++i) {
+            if (!cli_args_handled[i]) {
+                cli_args_is_path[i] = true;
+                ++cli_args_paths_count;
+            }
+        }
+    }
 
-        if (argc == 1) {
-            char* res_content = "<span>Hello, World!</span>";
-            httpsrvdev_res_status_line(&inst, 200);
-            httpsrvdev_res_header     (&inst, "Content-Type"  , "text/html");
-            httpsrvdev_res_headerf    (&inst, "Content-Length", "%d",
-                                              strlen(res_content));
-            httpsrvdev_res_body       (&inst, res_content);
-        } else if (argc == 2) {
-            char* path = argv[1];
-            if (!httpsrvdev_res_file_sys_entry(&inst, path)) {
-                if (inst.err & httpsrvdev_COULD_NOT_OPEN_FILE) {
-                    if ((inst.err & httpsrvdev_MASK_ERRNO) == ENOENT) {
-                        char* res_content = "File not found!";
-                        httpsrvdev_res_status_line(&inst, 404);
-                        httpsrvdev_res_header     (&inst, "Content-Type"  , "text/plain");
-                        httpsrvdev_res_headerf    (&inst, "Content-Length", "%d",
-                                                          strlen(res_content));
-                        httpsrvdev_res_body       (&inst, res_content);
-                    } else {
-                        char* res_content = "Internal server error!";
-                        httpsrvdev_res_status_line(&inst, 500);
-                        httpsrvdev_res_header     (&inst, "Content-Type"  , "text/plain");
-                        httpsrvdev_res_headerf    (&inst, "Content-Length", "%d",
-                                                          strlen(res_content));
-                        httpsrvdev_res_body       (&inst, res_content);
-                    }
+    httpsrvdev_start(&inst);
+    log_fmt(INFO, "Listening...");
+    if (cli_args_paths_count < 2) {
+        if (cli_args_paths_count == 1) {
+            for (size_t i = 0; i < cli_args_count; ++i) {
+                if (cli_args_is_path[i]) {
+                    strcpy(inst.root_path, cli_args[i]);
+                    break;
                 }
             }
-        } else if (argc > 2) {
-            httpsrvdev_res_listing_begin(&inst);
-            for (size_t arg_i = 1; arg_i < argc; ++arg_i) {
-                char* path = argv[arg_i];
-                httpsrvdev_res_listing_entry(&inst, path, path);
-            }
-            httpsrvdev_res_listing_end(&inst);
         }
+        while (httpsrvdev_res_begin(&inst)) {
+            // TODO: Add proper target parsing
+            char* rel_path0 = httpsrvdev_req_slice(&inst, &inst.req_target_slice);
+            char* rel_path1;
+            if (rel_path0[0] == '/') {
+                rel_path1 = rel_path0 + 1;
+            } else {
+                rel_path1 = rel_path0;
+            }
+
+            if (!httpsrvdev_res_rel_file_sys_entryf(&inst, rel_path1)) {
+                if ((inst.err & httpsrvdev_MASK_ERRNO) == ENOENT) {
+                    httpsrvdev_res_status_line(&inst, 404);
+                    httpsrvdev_res_header(&inst,"Content-Type", "text/plain");
+                    httpsrvdev_res_body  (&inst, "File not found!");
+                } else {
+                    httpsrvdev_res_status_line(&inst, 500);
+                    httpsrvdev_res_header(&inst,"Content-Type", "text/plain");
+                    httpsrvdev_res_body  (&inst, "Internal server error!");
+                }
+            }
+
+            free(rel_path0);
+        }
+    } else {
     }
 
     return EXIT_SUCCESS;

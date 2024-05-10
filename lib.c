@@ -22,6 +22,8 @@ struct httpsrvdev_inst httpsrvdev_init_begin() {
         .res_chunk_len = 0,
 
         .default_file_mime_type = "\0",
+
+        .root_path = ".",
     };
 
     return inst;
@@ -53,7 +55,6 @@ bool httpsrvdev_start(struct httpsrvdev_inst* inst) {
                &no_linger, sizeof(no_linger));
     // Start listening on the socket
     listen(inst->listen_sock_fd, 1);
-    printf("Listening...\n");
 
     return true;
 }
@@ -67,20 +68,13 @@ bool httpsrvdev_stop(struct httpsrvdev_inst* inst) {
     return true;
 }
 
-char* httpsrvdev_req_slice_start(struct httpsrvdev_inst* inst, uint16_t(*slice)[2]) {
-    return inst->req_buf + ((size_t) (*slice)[0]);
-}
-
-size_t httpsrvdev_req_slice_len(struct httpsrvdev_inst* inst, uint16_t(*slice)[2]) {
-    return (*slice)[1] - (*slice)[0];
-}
-
 char* httpsrvdev_req_slice(struct httpsrvdev_inst* inst, uint16_t(*slice)[2]) {
-    size_t len = httpsrvdev_req_slice_len(inst, slice);
-    char* ptr = malloc(len + 1);
-    strncpy(ptr, httpsrvdev_req_slice_start(inst, slice), len);
+    size_t len = (*slice)[1];
+    char* result_ptr = malloc(len + 1);
+    memcpy(result_ptr, inst->req_buf + (*slice)[0], len - 1);
+    *(result_ptr + len - 1) = '\0';
 
-    return ptr;
+    return result_ptr;
 }
 
 static bool parse_req(struct httpsrvdev_inst* inst) {
@@ -180,7 +174,7 @@ static bool parse_req(struct httpsrvdev_inst* inst) {
     // Parse the request target, e.g. the URL to the dev server
     inst->req_target_slice[0] = i;
     while (inst->req_buf[i++] != ' ') {}
-    inst->req_target_slice[1] = i;
+    inst->req_target_slice[1] = i - inst->req_target_slice[0];
 
     // Parse 'HTTP1.(1|0) '
     if (inst->req_buf[i++] != 'H' ||
@@ -352,41 +346,161 @@ bool httpsrvdev_res_body(struct httpsrvdev_inst* inst, char* body) {
     return true;
 }
 
+static bool resolve_path(struct httpsrvdev_inst* inst,
+    char* base_path, char* path, char* resolved_path
+) {
+    char full_path[512];
+    if (path[0] == '/') {
+        strcpy(full_path, path);
+    } else {
+        char* base_path_end_ptr = stpcpy(full_path, base_path);
+        *(base_path_end_ptr++) = '/';
+        strcpy(base_path_end_ptr, path);
+    }
+
+    bool is_abs = false;
+    size_t i = 0;
+    size_t full_path_len = strlen(full_path);
+    size_t   path_stack_max_size = 16;
+    size_t   path_stack_size     = 0;
+    uint16_t path_stack[path_stack_max_size][2];
+
+    if (full_path_len == 0) return false;
+
+    if (full_path[i] == '/') {
+        is_abs = true;
+        ++i;
+    }
+
+    for (size_t j = 0; j < path_stack_max_size; ++j) {
+        uint16_t slice_start = i;
+        uint16_t slice_len   = 0;
+        while (i < full_path_len && full_path[i] != '/') {
+            ++slice_len;
+            ++i;
+        }
+
+        if (slice_len == 0) {
+            if (i >= full_path_len - 1) break;
+            return false;
+        } else if (slice_len == 1 && full_path[slice_start] == '.') {
+            // Do nothing
+        } else if (slice_len == 2 &&
+            full_path[slice_start] == '.' && full_path[slice_start + 1] == '.'
+        ) {
+            if (path_stack_size == 0) return false;
+            --path_stack_size;
+        } else {
+            path_stack[path_stack_size][0] = slice_start;
+            path_stack[path_stack_size][1] = slice_len;
+            ++path_stack_size;
+        }
+
+        if (i >= full_path_len) break;
+
+        ++i;
+    }
+
+    char* ptr = resolved_path;
+    if (is_abs) {
+        *(ptr++) = '/';
+    } else {
+        *(ptr++) = '.';
+        *(ptr++) = '/';
+    }
+    for (size_t l = 0; l < path_stack_size; ++l) {
+        ptr = stpncpy(ptr, full_path + path_stack[l][0], path_stack[l][1]);
+        if (l < path_stack_size - 1) {
+            *(ptr++) = '/';
+        }
+    }
+    if (ptr == resolved_path) {
+        *(ptr++) = '.';
+    }
+    *ptr = '\0';
+
+    return resolved_path;
+}
+
+bool path_relative_to(struct httpsrvdev_inst* inst,
+    char* base_path, char* path, char* rel_path
+) {
+    size_t path_len = strlen(path);
+
+    if (path_len > 0 && path[0] == '/') {
+        strcpy(rel_path, path);
+        return true;
+    }
+    if (path_len == 1 && path[0] == '.') {
+        ++path;
+        path_len = 0;
+    }
+    if (path_len >= 2 && path[0] == '.' && path[1] == '/') {
+        path += 2;
+        path_len -= 2;
+    }
+
+    size_t base_path_len = strlen(base_path);
+
+    if (base_path_len == 1 && base_path[0] == '.') {
+        ++base_path;
+        base_path_len = 0;
+    }
+    if (base_path_len >= 2 && base_path[0] == '.' && base_path[1] == '/') {
+        base_path += 2;
+        base_path_len -= 2;
+    }
+
+    if (strncmp(base_path, path, base_path_len) != 0) return false;
+
+    strcpy(rel_path, path + base_path_len);
+    return true;
+}
+
 bool httpsrvdev_res_file(struct httpsrvdev_inst* inst, char* path) {
     char* mime_type = httpsrvdev_file_mime_type(inst, path);
 
     int fd = open(path, O_RDONLY);
     if (fd == -1) {
         inst->err = httpsrvdev_COULD_NOT_OPEN_FILE | (errno & httpsrvdev_MASK_ERRNO);
+        // Goto ensures that file descriptor is closed
+        close(fd);
         return false;
     }
 
     if (lseek(fd, 0, SEEK_SET) == -1) {
         inst->err = httpsrvdev_FILE_SYS_ERR | (errno & httpsrvdev_MASK_ERRNO);
+        close(fd);
         return false;
     }
     int content_length = lseek(fd, 0, SEEK_END);
     if (content_length == -1) {
         inst->err = httpsrvdev_COULD_NOT_GET_FILE_CONTENT_LENGTH |
                     (errno & httpsrvdev_MASK_ERRNO);
+        close(fd);
         return false;
     }
     if (lseek(fd, 0, SEEK_SET) == -1) {
         inst->err = httpsrvdev_FILE_SYS_ERR | (errno & httpsrvdev_MASK_ERRNO);
+        close(fd);
         return false;
     }
 
     char content_length_value_buf[20];
     sprintf(content_length_value_buf, "%d", content_length);
-    if (!httpsrvdev_res_status_line(inst, 200))                         return false;
-    if (!httpsrvdev_res_header(inst, "Content-Type"  , mime_type     )) return false;
-    if (!httpsrvdev_res_header(inst, "Content-Length", content_length_value_buf))
+    if (!httpsrvdev_res_status_line(inst, 200                                  ) ||
+        !httpsrvdev_res_header(inst, "Content-Type"  , mime_type               ) ||
+        !httpsrvdev_res_header(inst, "Content-Length", content_length_value_buf)
+    ) {
+        close(fd);
         return false;
+    }
 
     // TODO: Read and send in chunks
     char file_content_buf[content_length];
-    if (read(fd, file_content_buf, 2048) == -1) {
+    if (read(fd, file_content_buf, content_length) == -1) {
         inst->err = httpsrvdev_COULD_NOT_READ_FILE | (errno & httpsrvdev_MASK_ERRNO);
+        close(fd);
         return false;
     }
 
@@ -405,8 +519,9 @@ bool httpsrvdev_res_file(struct httpsrvdev_inst* inst, char* path) {
 }
 
 bool httpsrvdev_res_dir(struct httpsrvdev_inst* inst, char* dir_path) {
-    char  entry_path_buf[512];
-    char* entry_name_in_path_start = stpcpy(entry_path_buf, dir_path);
+    char entry_path_buf[512];
+    if (!path_relative_to(inst, inst->root_path, dir_path, entry_path_buf)) return false;
+    char* entry_name_in_path_start = entry_path_buf + strlen(entry_path_buf);
     if (*(entry_name_in_path_start - 1) != '/') {
         *entry_name_in_path_start = '/';
         ++entry_name_in_path_start;
@@ -419,11 +534,9 @@ bool httpsrvdev_res_dir(struct httpsrvdev_inst* inst, char* dir_path) {
         inst->err = httpsrvdev_COULD_NOT_OPEN_DIR | (errno & httpsrvdev_MASK_ERRNO);
         return false;
     }
-    printf("%s -\n", entry_path_buf);
     for (size_t i = 0; i < n_entries; ++i) {
         char* entry_name = entries[i]->d_name;
         strcpy(entry_name_in_path_start, entry_name);
-        printf("%s %s\n", entry_path_buf, entry_name);
         httpsrvdev_res_listing_entry(inst, entry_path_buf, entry_name);
     }
     httpsrvdev_res_listing_end(inst);
@@ -448,6 +561,90 @@ bool httpsrvdev_res_file_sys_entry(struct httpsrvdev_inst* inst, char* path) {
 
     inst->err = httpsrvdev_UNHANDLED_FILE_TYPE | (file_type & httpsrvdev_MASK_FILE_TYPE);
     return false;
+}
+
+bool httpsrvdev_res_filef(struct httpsrvdev_inst* inst, char* file_path_fmt, ...) {
+    va_list sprintf_args;
+    va_start(sprintf_args, file_path_fmt);
+    char file_path_buf[512];
+    vsprintf(file_path_buf, file_path_fmt, sprintf_args);
+    va_end(sprintf_args);
+
+    return httpsrvdev_res_file(inst, file_path_buf);
+}
+
+bool httpsrvdev_res_dirf(struct httpsrvdev_inst* inst, char* dir_path_fmt, ...) {
+    va_list sprintf_args;
+    va_start(sprintf_args, dir_path_fmt);
+    char dir_path_buf[512];
+    vsprintf(dir_path_buf, dir_path_fmt, sprintf_args);
+    va_end(sprintf_args);
+
+    return httpsrvdev_res_dir(inst, dir_path_buf);
+}
+
+bool httpsrvdev_res_file_sys_entryf(struct httpsrvdev_inst* inst, char* path_fmt, ...) {
+    va_list sprintf_args;
+    va_start(sprintf_args, path_fmt);
+    char path_buf[512];
+    vsprintf(path_buf, path_fmt, sprintf_args);
+    va_end(sprintf_args);
+
+    return httpsrvdev_res_file_sys_entry(inst, path_buf);
+}
+
+bool httpsrvdev_res_rel_file(struct httpsrvdev_inst* inst, char* path) {
+    char resolved_path[512];
+    resolve_path(inst, inst->root_path, path, resolved_path);
+    return httpsrvdev_res_file(inst, resolved_path);
+}
+
+bool httpsrvdev_res_rel_dir(struct httpsrvdev_inst* inst, char* path) {
+    char resolved_path[512];
+    resolve_path(inst, inst->root_path, path, resolved_path);
+    return httpsrvdev_res_dir(inst, resolved_path);
+}
+
+bool httpsrvdev_res_rel_file_sys_entry (struct httpsrvdev_inst* inst, char* path) {
+    char resolved_path[512];
+    resolve_path(inst, inst->root_path, path, resolved_path);
+    return httpsrvdev_res_dir(inst, resolved_path);
+}
+
+bool httpsrvdev_res_rel_filef(struct httpsrvdev_inst* inst, char* path_fmt, ...) {
+    va_list sprintf_args;
+    va_start(sprintf_args, path_fmt);
+    char path_buf[512];
+    vsprintf(path_buf, path_fmt, sprintf_args);
+    va_end(sprintf_args);
+
+    char resolved_path[512];
+    resolve_path(inst, inst->root_path, path_buf, resolved_path);
+    return httpsrvdev_res_file(inst, resolved_path);
+}
+
+bool httpsrvdev_res_rel_dirf(struct httpsrvdev_inst* inst, char* path_fmt, ...) {
+    va_list sprintf_args;
+    va_start(sprintf_args, path_fmt);
+    char path_buf[512];
+    vsprintf(path_buf, path_fmt, sprintf_args);
+    va_end(sprintf_args);
+
+    char resolved_path[512];
+    resolve_path(inst, inst->root_path, path_buf, resolved_path);
+    return httpsrvdev_res_dir(inst, resolved_path);
+}
+
+bool httpsrvdev_res_rel_file_sys_entryf(struct httpsrvdev_inst* inst, char* path_fmt, ...) {
+    va_list sprintf_args;
+    va_start(sprintf_args, path_fmt);
+    char path_buf[512];
+    vsprintf(path_buf, path_fmt, sprintf_args);
+    va_end(sprintf_args);
+
+    char resolved_path[512];
+    resolve_path(inst, inst->root_path, path_buf, resolved_path);
+    return httpsrvdev_res_file_sys_entry(inst, resolved_path);
 }
 
 bool httpsrvdev_res_listing_begin(struct httpsrvdev_inst* inst) {
@@ -745,25 +942,24 @@ int64_t httpsrvdev_ipv4_parse(struct httpsrvdev_inst* inst, char* str) {
 
     int64_t i = strlen(str);
     for (size_t j = 0; j < 4; ++j) {
-        if (--i < 0) goto err;
+        if (--i < 0) goto err_return;
 
         int64_t byte = 0;
         for (int64_t decimal_exp = 1; decimal_exp < 1001; decimal_exp *= 10) {
-            if (decimal_exp > 100)                 goto err;
-            if (!('0' <= str[i] && str[i] <= '9')) goto err;
+            if (decimal_exp > 100 || !('0' <= str[i] && str[i] <= '9'))
+                goto err_return;
 
             byte += decimal_exp*(str[i--] - '0');
 
-            if (byte > 255)                        goto err;
-            if (str[i] == '.')                     break;
-            if (i < 0)                             break;
+            if (byte > 255)             goto err_return;
+            if (str[i] == '.' || i < 0) break;
         }
         ip |= (byte << (8*j));
     }
 
     return ip;
 
-err:
+err_return:
     inst->err = httpsrvdev_INVALID_IP;
     return -1;
 }

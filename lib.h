@@ -57,37 +57,52 @@ struct httpsrvdev_inst {
 
     char   listing_res_content[2048];
     size_t listing_res_content_len;
+
+    char root_path[512];
 };
 
 struct httpsrvdev_inst httpsrvdev_init_begin();
-bool     httpsrvdev_init_end          (struct httpsrvdev_inst* inst);
-bool     httpsrvdev_start             (struct httpsrvdev_inst* inst);
-bool     httpsrvdev_stop              (struct httpsrvdev_inst* inst);
-char*    httpsrvdev_req_slice_start   (struct httpsrvdev_inst* inst, uint16_t(*slice)[2]);
-size_t   httpsrvdev_req_slice_len     (struct httpsrvdev_inst* inst, uint16_t(*slice)[2]);
-char*    httpsrvdev_req_slice         (struct httpsrvdev_inst* inst, uint16_t(*slice)[2]);
-bool     httpsrvdev_res_begin         (struct httpsrvdev_inst* inst);
-bool     httpsrvdev_res_send_n        (struct httpsrvdev_inst* inst,
-                                           char* str, size_t n);
-bool     httpsrvdev_res_send          (struct httpsrvdev_inst* inst, char* str);
-bool     httpsrvdev_res_end           (struct httpsrvdev_inst* inst);
-bool     httpsrvdev_res_status_line   (struct httpsrvdev_inst* inst, int status);
-bool     httpsrvdev_res_header        (struct httpsrvdev_inst* inst,
-                                           char* name, char* value);
-bool     httpsrvdev_res_headerf       (struct httpsrvdev_inst* inst,
-                                           char* name, char* value_fmt, ...);
-bool     httpsrvdev_res_body          (struct httpsrvdev_inst* inst, char* body);
-bool     httpsrvdev_res_file          (struct httpsrvdev_inst* inst, char* path);
-bool     httpsrvdev_res_dir           (struct httpsrvdev_inst* inst, char* path);
-bool     httpsrvdev_res_file_sys_entry(struct httpsrvdev_inst* inst, char* path);
-bool     httpsrvdev_res_listing_begin (struct httpsrvdev_inst* inst);
-bool     httpsrvdev_res_listing_entry (struct httpsrvdev_inst* inst,
-                                           char* path, char* link_text);
-bool     httpsrvdev_res_listing_end   (struct httpsrvdev_inst* inst);
-uint64_t httpsrvdev_file_encode_ext   (struct httpsrvdev_inst* inst, char* file_path);
-char*    httpsrvdev_file_mime_type    (struct httpsrvdev_inst* inst, char* file_path);
-bool     httpsrvdev_ipv4_from_str     (struct httpsrvdev_inst* inst, char* str);
-int64_t  httpsrvdev_ipv4_parse        (struct httpsrvdev_inst* inst, char* str);
-bool     httpsrvdev_port_from_str     (struct httpsrvdev_inst* inst, char* str);
-int      httpsrvdev_port_parse        (struct httpsrvdev_inst* inst, char* str);
+bool     httpsrvdev_init_end               (struct httpsrvdev_inst* inst);
+bool     httpsrvdev_start                  (struct httpsrvdev_inst* inst);
+bool     httpsrvdev_stop                   (struct httpsrvdev_inst* inst);
+char*    httpsrvdev_req_slice_start        (struct httpsrvdev_inst* inst, uint16_t(*slice)[2]);
+size_t   httpsrvdev_req_slice_len          (struct httpsrvdev_inst* inst, uint16_t(*slice)[2]);
+char*    httpsrvdev_req_slice              (struct httpsrvdev_inst* inst, uint16_t(*slice)[2]);
+bool     httpsrvdev_res_begin              (struct httpsrvdev_inst* inst);
+bool     httpsrvdev_res_send_n             (struct httpsrvdev_inst* inst,
+                                                 char* str, size_t n);
+bool     httpsrvdev_res_send               (struct httpsrvdev_inst* inst, char* str);
+bool     httpsrvdev_res_end                (struct httpsrvdev_inst* inst);
+bool     httpsrvdev_res_status_line        (struct httpsrvdev_inst* inst, int status);
+bool     httpsrvdev_res_header             (struct httpsrvdev_inst* inst,
+                                                 char* name, char* value);
+bool     httpsrvdev_res_headerf            (struct httpsrvdev_inst* inst,
+                                                 char* name, char* value_fmt, ...);
+bool     httpsrvdev_res_body               (struct httpsrvdev_inst* inst, char* body);
+bool     httpsrvdev_res_file               (struct httpsrvdev_inst* inst, char* path);
+bool     httpsrvdev_res_dir                (struct httpsrvdev_inst* inst, char* path);
+bool     httpsrvdev_res_file_sys_entry     (struct httpsrvdev_inst* inst, char* path);
+bool     httpsrvdev_res_filef              (struct httpsrvdev_inst* inst, char* file_path_fmt,
+                                                ...);
+bool     httpsrvdev_res_dirf               (struct httpsrvdev_inst* inst, char* dir_path_fmt,
+                                                ...);
+bool     httpsrvdev_res_file_sys_entryf    (struct httpsrvdev_inst* inst, char* path_fmt, ...);
+bool     httpsrvdev_res_rel_file           (struct httpsrvdev_inst* inst, char* path);
+bool     httpsrvdev_res_rel_dir            (struct httpsrvdev_inst* inst, char* path);
+bool     httpsrvdev_res_rel_file_sys_entry (struct httpsrvdev_inst* inst, char* path);
+bool     httpsrvdev_res_rel_filef          (struct httpsrvdev_inst* inst, char* file_path_fmt,
+                                                ...);
+bool     httpsrvdev_res_rel_dirf           (struct httpsrvdev_inst* inst, char* dir_path_fmt,
+                                                ...);
+bool     httpsrvdev_res_rel_file_sys_entryf(struct httpsrvdev_inst* inst, char* path_fmt, ...);
+bool     httpsrvdev_res_listing_begin      (struct httpsrvdev_inst* inst);
+bool     httpsrvdev_res_listing_entry      (struct httpsrvdev_inst* inst,
+                                                char* path, char* link_text);
+bool     httpsrvdev_res_listing_end        (struct httpsrvdev_inst* inst);
+uint64_t httpsrvdev_file_encode_ext        (struct httpsrvdev_inst* inst, char* file_path);
+char*    httpsrvdev_file_mime_type         (struct httpsrvdev_inst* inst, char* file_path);
+bool     httpsrvdev_ipv4_from_str          (struct httpsrvdev_inst* inst, char* str);
+int64_t  httpsrvdev_ipv4_parse             (struct httpsrvdev_inst* inst, char* str);
+bool     httpsrvdev_port_from_str          (struct httpsrvdev_inst* inst, char* str);
+int      httpsrvdev_port_parse             (struct httpsrvdev_inst* inst, char* str);
 
