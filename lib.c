@@ -10,6 +10,13 @@
 #include <unistd.h>
 #include "lib.h"
 
+#define RESOLVE_FMT_ARGS \
+    va_list sprintf_args; \
+    va_start(sprintf_args, fmt); \
+    char str[512]; \
+    vsprintf(str, fmt, sprintf_args); \
+    va_end(sprintf_args)
+
 struct httpsrvdev_inst httpsrvdev_init_begin() {
     struct httpsrvdev_inst inst = {
         .err = httpsrvdev_NO_ERR,
@@ -322,14 +329,9 @@ bool httpsrvdev_res_header(struct httpsrvdev_inst* inst, char* name, char* value
     return true;
 }
 
-bool httpsrvdev_res_headerf(struct httpsrvdev_inst* inst, char* name, char* value_fmt, ...) {
-    va_list sprintf_args;
-    va_start(sprintf_args, value_fmt);
-    char value_buf[256];
-    vsprintf(value_buf, value_fmt, sprintf_args);
-    va_end(sprintf_args);
-
-    return httpsrvdev_res_header(inst, name, value_buf);
+bool httpsrvdev_res_headerf(struct httpsrvdev_inst* inst, char* name, char* fmt, ...) {
+    RESOLVE_FMT_ARGS;
+    return httpsrvdev_res_header(inst, name, str);
 }
 
 bool httpsrvdev_res_body(struct httpsrvdev_inst* inst, char* body) {
@@ -563,34 +565,19 @@ bool httpsrvdev_res_file_sys_entry(struct httpsrvdev_inst* inst, char* path) {
     return false;
 }
 
-bool httpsrvdev_res_filef(struct httpsrvdev_inst* inst, char* file_path_fmt, ...) {
-    va_list sprintf_args;
-    va_start(sprintf_args, file_path_fmt);
-    char file_path_buf[512];
-    vsprintf(file_path_buf, file_path_fmt, sprintf_args);
-    va_end(sprintf_args);
-
-    return httpsrvdev_res_file(inst, file_path_buf);
+bool httpsrvdev_res_filef(struct httpsrvdev_inst* inst, char* fmt, ...) {
+    RESOLVE_FMT_ARGS;
+    return httpsrvdev_res_file(inst, str);
 }
 
-bool httpsrvdev_res_dirf(struct httpsrvdev_inst* inst, char* dir_path_fmt, ...) {
-    va_list sprintf_args;
-    va_start(sprintf_args, dir_path_fmt);
-    char dir_path_buf[512];
-    vsprintf(dir_path_buf, dir_path_fmt, sprintf_args);
-    va_end(sprintf_args);
-
-    return httpsrvdev_res_dir(inst, dir_path_buf);
+bool httpsrvdev_res_dirf(struct httpsrvdev_inst* inst, char* fmt, ...) {
+    RESOLVE_FMT_ARGS;
+    return httpsrvdev_res_dir(inst, str);
 }
 
-bool httpsrvdev_res_file_sys_entryf(struct httpsrvdev_inst* inst, char* path_fmt, ...) {
-    va_list sprintf_args;
-    va_start(sprintf_args, path_fmt);
-    char path_buf[512];
-    vsprintf(path_buf, path_fmt, sprintf_args);
-    va_end(sprintf_args);
-
-    return httpsrvdev_res_file_sys_entry(inst, path_buf);
+bool httpsrvdev_res_file_sys_entryf(struct httpsrvdev_inst* inst, char* fmt, ...) {
+    RESOLVE_FMT_ARGS;
+    return httpsrvdev_res_file_sys_entry(inst, str);
 }
 
 bool httpsrvdev_res_rel_file(struct httpsrvdev_inst* inst, char* path) {
@@ -611,39 +598,24 @@ bool httpsrvdev_res_rel_file_sys_entry (struct httpsrvdev_inst* inst, char* path
     return httpsrvdev_res_dir(inst, resolved_path);
 }
 
-bool httpsrvdev_res_rel_filef(struct httpsrvdev_inst* inst, char* path_fmt, ...) {
-    va_list sprintf_args;
-    va_start(sprintf_args, path_fmt);
-    char path_buf[512];
-    vsprintf(path_buf, path_fmt, sprintf_args);
-    va_end(sprintf_args);
-
+bool httpsrvdev_res_rel_filef(struct httpsrvdev_inst* inst, char* fmt, ...) {
+    RESOLVE_FMT_ARGS;
     char resolved_path[512];
-    resolve_path(inst, inst->root_path, path_buf, resolved_path);
+    resolve_path(inst, inst->root_path, str, resolved_path);
     return httpsrvdev_res_file(inst, resolved_path);
 }
 
-bool httpsrvdev_res_rel_dirf(struct httpsrvdev_inst* inst, char* path_fmt, ...) {
-    va_list sprintf_args;
-    va_start(sprintf_args, path_fmt);
-    char path_buf[512];
-    vsprintf(path_buf, path_fmt, sprintf_args);
-    va_end(sprintf_args);
-
+bool httpsrvdev_res_rel_dirf(struct httpsrvdev_inst* inst, char* fmt, ...) {
+    RESOLVE_FMT_ARGS;
     char resolved_path[512];
-    resolve_path(inst, inst->root_path, path_buf, resolved_path);
+    resolve_path(inst, inst->root_path, str, resolved_path);
     return httpsrvdev_res_dir(inst, resolved_path);
 }
 
-bool httpsrvdev_res_rel_file_sys_entryf(struct httpsrvdev_inst* inst, char* path_fmt, ...) {
-    va_list sprintf_args;
-    va_start(sprintf_args, path_fmt);
-    char path_buf[512];
-    vsprintf(path_buf, path_fmt, sprintf_args);
-    va_end(sprintf_args);
-
+bool httpsrvdev_res_rel_file_sys_entryf(struct httpsrvdev_inst* inst, char* fmt, ...) {
+    RESOLVE_FMT_ARGS;
     char resolved_path[512];
-    resolve_path(inst, inst->root_path, path_buf, resolved_path);
+    resolve_path(inst, inst->root_path, str, resolved_path);
     return httpsrvdev_res_file_sys_entry(inst, resolved_path);
 }
 
