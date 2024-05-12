@@ -105,13 +105,20 @@ bool httpsrvdev_stop(struct httpsrvdev_inst* inst) {
     return true;
 }
 
-char* httpsrvdev_req_slice(struct httpsrvdev_inst* inst, uint16_t(*slice)[2]) {
+bool httpsrvdev_req_slice_copy_to_buf(struct httpsrvdev_inst* inst,
+    uint16_t(*slice)[2],
+    char*  dst_buf,
+    size_t dst_buf_len
+) {
     size_t len = (*slice)[1];
-    char* result_ptr = malloc(len + 1);
-    memcpy(result_ptr, inst->req_buf + (*slice)[0], len - 1);
-    *(result_ptr + len - 1) = '\0';
+    if (len > dst_buf_len - 1) {
+        inst->err = httpsrvdev_BUF_TOO_SMALL;
+        return false;
+    }
 
-    return result_ptr;
+    strncpy(dst_buf, inst->req_buf + (*slice)[0], len - 1);
+    dst_buf[len - 1] = '\0';
+    return true;
 }
 
 static bool parse_req(struct httpsrvdev_inst* inst) {

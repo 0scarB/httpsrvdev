@@ -14,19 +14,25 @@
 
 #define httpsrvdev_NO_ERR                            (int64_t) -1
 #define httpsrvdev_CANNOT_PARSE_REQ                  (int64_t) 0x0100000
-#define httpsrvdev_EXCEEDED_MAX_RES_CHUNK_SIZE       (int64_t) 0x0200000
-#define httpsrvdev_FILE_SYS_ERR                      (int64_t) 0x04FF000
-#define httpsrvdev_COULD_NOT_OPEN_FILE               (int64_t) 0x0400000 
-#define httpsrvdev_COULD_NOT_GET_FILE_CONTENT_LENGTH (int64_t) 0x0401000 
-#define httpsrvdev_COULD_NOT_READ_FILE               (int64_t) 0x0402000 
-#define httpsrvdev_COULD_NOT_CLOSE_FILE              (int64_t) 0x0404000 
-#define httpsrvdev_FILE_HAS_NO_EXT                   (int64_t) 0x0408000
-#define httpsrvdev_COULD_NOT_OPEN_DIR                (int64_t) 0x0410000
-#define httpsrvdev_COULD_NOT_STAT                    (int64_t) 0x0411000
-#define httpsrvdev_UNHANDLED_FILE_TYPE               (int64_t) 0x0412000
-#define httpsrvdev_INVALID_IP                        (int64_t) 0x0800000
-#define httpsrvdev_INVALID_PORT                      (int64_t) 0x0810000
+
+#define httpsrvdev_FILE_SYS_ERR                      (int64_t) 0x02FF000
+#define httpsrvdev_COULD_NOT_OPEN_FILE               (int64_t) 0x0200000
+#define httpsrvdev_COULD_NOT_GET_FILE_CONTENT_LENGTH (int64_t) 0x0201000
+#define httpsrvdev_COULD_NOT_READ_FILE               (int64_t) 0x0202000
+#define httpsrvdev_COULD_NOT_CLOSE_FILE              (int64_t) 0x0204000
+#define httpsrvdev_FILE_HAS_NO_EXT                   (int64_t) 0x0208000
+#define httpsrvdev_COULD_NOT_OPEN_DIR                (int64_t) 0x0210000
+#define httpsrvdev_COULD_NOT_STAT                    (int64_t) 0x0211000
+#define httpsrvdev_UNHANDLED_FILE_TYPE               (int64_t) 0x0212000
+
+#define httpsrvdev_INVALID_IP                        (int64_t) 0x0400000
+#define httpsrvdev_INVALID_PORT                      (int64_t) 0x0410000
+
+#define httpsrvdev_MEM_ERR                           (int64_t) 0x08FF000
+#define httpsrvdev_BUF_TOO_SMALL                     (int64_t) 0x0800000
+
 #define httpsrvdev_LIB_IMPL_ERR                      (int64_t) 0x8000000
+
 #define httpsrvdev_MASK_ERRNO                        (int64_t) 0x0000FFF
 #define httpsrvdev_MASK_FILE_TYPE                    (int64_t) 0x0000FFF
 
@@ -65,19 +71,19 @@ struct httpsrvdev_inst httpsrvdev_init_begin();
 bool     httpsrvdev_init_end               (struct httpsrvdev_inst* inst);
 bool     httpsrvdev_start                  (struct httpsrvdev_inst* inst);
 bool     httpsrvdev_stop                   (struct httpsrvdev_inst* inst);
-char*    httpsrvdev_req_slice_start        (struct httpsrvdev_inst* inst, uint16_t(*slice)[2]);
-size_t   httpsrvdev_req_slice_len          (struct httpsrvdev_inst* inst, uint16_t(*slice)[2]);
-char*    httpsrvdev_req_slice              (struct httpsrvdev_inst* inst, uint16_t(*slice)[2]);
+bool     httpsrvdev_req_slice_copy_to_buf  (struct httpsrvdev_inst* inst,
+                                                uint16_t(*slice)[2],
+                                                char* dst_buf, size_t dst_buf_len);
 bool     httpsrvdev_res_begin              (struct httpsrvdev_inst* inst);
 bool     httpsrvdev_res_send_n             (struct httpsrvdev_inst* inst,
-                                                 char* str, size_t n);
+                                                char* str, size_t n);
 bool     httpsrvdev_res_send               (struct httpsrvdev_inst* inst, char* str);
 bool     httpsrvdev_res_end                (struct httpsrvdev_inst* inst);
 bool     httpsrvdev_res_status_line        (struct httpsrvdev_inst* inst, int status);
 bool     httpsrvdev_res_header             (struct httpsrvdev_inst* inst,
-                                                 char* name, char* value);
+                                                char* name, char* value);
 bool     httpsrvdev_res_headerf            (struct httpsrvdev_inst* inst,
-                                                 char* name, char* value_fmt, ...);
+                                                char* name, char* value_fmt, ...);
 bool     httpsrvdev_res_body               (struct httpsrvdev_inst* inst, char* body);
 bool     httpsrvdev_res_file               (struct httpsrvdev_inst* inst, char* path);
 bool     httpsrvdev_res_dir                (struct httpsrvdev_inst* inst, char* path);

@@ -243,40 +243,102 @@ int main(int argc, char* argv[]) {
 
     httpsrvdev_start(&inst);
     log_fmt(INFO, "Listening...");
+
+    size_t route_buf_len = 512;
+    char   route_buf[route_buf_len];
     if (cli_args_paths_count < 2) {
         if (cli_args_paths_count == 1) {
             for (size_t i = 0; i < cli_args_count; ++i) {
                 if (cli_args_is_path[i]) {
-                    strcpy(inst.root_path, cli_args[i]);
+                    char* path = cli_args[i];
+                    if (path[0] == '/') {
+                        strcpy(inst.root_path, "/");
+                    } else {
+                        strcpy(inst.root_path, path);
+                    }
                     break;
                 }
             }
         }
         while (httpsrvdev_res_begin(&inst)) {
             // TODO: Add proper target parsing
-            char* rel_path0 = httpsrvdev_req_slice(&inst, &inst.req_target_slice);
-            char* rel_path1;
-            if (rel_path0[0] == '/') {
-                rel_path1 = rel_path0 + 1;
+            // TODO: HTTP error response when slice is larger than route_buf_len
+            httpsrvdev_req_slice_copy_to_buf(
+                    &inst, &inst.req_target_slice,
+                    route_buf, route_buf_len);
+            char* path;
+            if (route_buf[0] == '/') {
+                path = route_buf + 1;
             } else {
-                rel_path1 = rel_path0;
+                path = route_buf;
             }
 
-            if (!httpsrvdev_res_rel_file_sys_entryf(&inst, rel_path1)) {
+            if (!httpsrvdev_res_rel_file_sys_entryf(&inst, path)) {
                 if ((inst.err & httpsrvdev_MASK_ERRNO) == ENOENT) {
                     httpsrvdev_res_status_line(&inst, 404);
-                    httpsrvdev_res_header(&inst,"Content-Type", "text/plain");
+                    httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
                     httpsrvdev_res_body  (&inst, "File not found!");
                 } else {
                     httpsrvdev_res_status_line(&inst, 500);
-                    httpsrvdev_res_header(&inst,"Content-Type", "text/plain");
+                    httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
                     httpsrvdev_res_body  (&inst, "Internal server error!");
                 }
             }
-
-            free(rel_path0);
         }
     } else {
+        char* set_root_path_route_prefix = "set_root_";
+        bool  root_path_is_set = false;
+
+        while (httpsrvdev_res_begin(&inst)) {
+            // TODO: Add proper target parsing
+            // TODO: HTTP error response when slice is larger than route_buf_len
+            httpsrvdev_req_slice_copy_to_buf(
+                    &inst, &inst.req_target_slice,
+                    route_buf, route_buf_len);
+            char* rel_route;
+            if (route_buf[0] == '/') {
+                rel_route = route_buf + 1;
+            } else {
+                rel_route = route_buf;
+            }
+
+            if (root_path_is_set) {
+                if (!httpsrvdev_res_rel_file_sys_entryf(&inst, rel_route)) {
+                    if ((inst.err & httpsrvdev_MASK_ERRNO) == ENOENT) {
+                        httpsrvdev_res_status_line(&inst, 404);
+                        httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
+                        httpsrvdev_res_body  (&inst, "File not found!");
+                    } else {
+                        httpsrvdev_res_status_line(&inst, 500);
+                        httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
+                        httpsrvdev_res_body  (&inst, "Internal server error!");
+                    }
+                }
+            } else if (rel_route[0] == '\0') {
+                httpsrvdev_res_listing_begin(&inst);
+                for (size_t i = 0; i < cli_args_count; ++i) {
+                    if (!cli_args_is_path[i]) continue;
+
+                    char* path = cli_args[i];
+                    char  link[512];
+                    sprintf(link, "%s%s", set_root_path_route_prefix, path);
+                    httpsrvdev_res_listing_entry(&inst, link, path);
+                }
+                httpsrvdev_res_listing_end(&inst);
+            } else if (strcmp(rel_route, set_root_path_route_prefix) >= 0) {
+                char* root_path = rel_route + strlen(set_root_path_route_prefix);
+                strcpy(inst.root_path, root_path);
+                root_path_is_set = true;
+
+                httpsrvdev_res_status_line(&inst, 303);
+                httpsrvdev_res_header     (&inst, "Location", "/");
+                httpsrvdev_res_end        (&inst);
+            } else {
+                httpsrvdev_res_status_line(&inst, 404);
+                httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
+                httpsrvdev_res_body  (&inst, "File not found!");
+            }
+        }
     }
 
     return EXIT_SUCCESS;
