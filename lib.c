@@ -10,12 +10,42 @@
 #include <unistd.h>
 #include "lib.h"
 
-#define RESOLVE_FMT_ARGS \
+// Resources:
+//     HTTP Semantics   : https://datatracker.ietf.org/doc/html/rfc9110
+//     HTTP/1.1 RFC 9112: https://datatracker.ietf.org/doc/html/rfc9112
+
+#define SPRINTF_TO_STR_FROM_FMT_AND_VARGS(str_buf_size) \
     va_list sprintf_args; \
     va_start(sprintf_args, fmt); \
-    char str[512]; \
+    char str[str_buf_size]; \
     vsprintf(str, fmt, sprintf_args); \
     va_end(sprintf_args)
+
+#ifdef DEV
+    // Utilities for use during development
+
+    void printf_with_escapes(char* fmt, ...) {
+        SPRINTF_TO_STR_FROM_FMT_AND_VARGS(1024*1024);
+        for (size_t i = 0; i < strlen(str); ++i) {
+            char c = str[i];
+            switch (c) {
+                case '\n':
+                    putchar('\\'); putchar('n'); putchar('\n');
+                    break;
+                case '\r':
+                    putchar('\\'); putchar('r'); putchar('\n');
+                    break;
+                case '\t':
+                    putchar('\\'); putchar('t'); putchar(' '); putchar(' ');
+                    break;
+                default:
+                    putchar(c);
+                    break;
+            }
+        }
+        fflush(stdout);
+    }
+#endif
 
 struct httpsrvdev_inst httpsrvdev_init_begin() {
     struct httpsrvdev_inst inst = {
@@ -299,12 +329,25 @@ bool httpsrvdev_res_send(struct httpsrvdev_inst* inst, char* str) {
 }
 
 bool httpsrvdev_res_end(struct httpsrvdev_inst* inst) {
+    if (inst->res_chunk_buf[inst->res_chunk_len - 2] != '\r' ||
+        inst->res_chunk_buf[inst->res_chunk_len - 1] != '\n'
+    ) {
+        httpsrvdev_res_send_n(inst, "\r\n", 2);
+    }
+
     if (inst->res_chunk_len > 0) {
+        inst->res_chunk_buf[inst->res_chunk_len] = '\0';
         write(inst->conn_sock_fd, inst->res_chunk_buf, inst->res_chunk_len);
         inst->res_chunk_len = 0;
     }
 
-    close(inst->conn_sock_fd);
+    if (inst->conn_sock_fd != -1) {
+        // Shutdown seems to be required before close for large files
+        // that require multiple write calls.
+        // TODO: Investigate why. Is this intended behaviour? Is it bad for performance?
+        shutdown(inst->conn_sock_fd, SHUT_RDWR);
+        close(inst->conn_sock_fd);
+    }
     inst->conn_sock_fd = -1;
 
     return true;
@@ -330,7 +373,7 @@ bool httpsrvdev_res_header(struct httpsrvdev_inst* inst, char* name, char* value
 }
 
 bool httpsrvdev_res_headerf(struct httpsrvdev_inst* inst, char* name, char* fmt, ...) {
-    RESOLVE_FMT_ARGS;
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
     return httpsrvdev_res_header(inst, name, str);
 }
 
@@ -492,7 +535,8 @@ bool httpsrvdev_res_file(struct httpsrvdev_inst* inst, char* path) {
     sprintf(content_length_value_buf, "%d", content_length);
     if (!httpsrvdev_res_status_line(inst, 200                                  ) ||
         !httpsrvdev_res_header(inst, "Content-Type"  , mime_type               ) ||
-        !httpsrvdev_res_header(inst, "Content-Length", content_length_value_buf)
+        !httpsrvdev_res_header(inst, "Content-Length", content_length_value_buf) ||
+        !httpsrvdev_res_header(inst, "Connection"    , "Keep-Alive")
     ) {
         close(fd);
         return false;
@@ -513,7 +557,6 @@ bool httpsrvdev_res_file(struct httpsrvdev_inst* inst, char* path) {
 
     if (!httpsrvdev_res_send_n(inst, "\r\n"          , 2             )) return false;
     if (!httpsrvdev_res_send_n(inst, file_content_buf, content_length)) return false;
-    if (!httpsrvdev_res_send_n(inst, "\r\n"          , 2             )) return false;
 
     if (!httpsrvdev_res_end(inst)) return false;
 
@@ -566,17 +609,17 @@ bool httpsrvdev_res_file_sys_entry(struct httpsrvdev_inst* inst, char* path) {
 }
 
 bool httpsrvdev_res_filef(struct httpsrvdev_inst* inst, char* fmt, ...) {
-    RESOLVE_FMT_ARGS;
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
     return httpsrvdev_res_file(inst, str);
 }
 
 bool httpsrvdev_res_dirf(struct httpsrvdev_inst* inst, char* fmt, ...) {
-    RESOLVE_FMT_ARGS;
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
     return httpsrvdev_res_dir(inst, str);
 }
 
 bool httpsrvdev_res_file_sys_entryf(struct httpsrvdev_inst* inst, char* fmt, ...) {
-    RESOLVE_FMT_ARGS;
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
     return httpsrvdev_res_file_sys_entry(inst, str);
 }
 
@@ -599,21 +642,21 @@ bool httpsrvdev_res_rel_file_sys_entry (struct httpsrvdev_inst* inst, char* path
 }
 
 bool httpsrvdev_res_rel_filef(struct httpsrvdev_inst* inst, char* fmt, ...) {
-    RESOLVE_FMT_ARGS;
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
     char resolved_path[512];
     resolve_path(inst, inst->root_path, str, resolved_path);
     return httpsrvdev_res_file(inst, resolved_path);
 }
 
 bool httpsrvdev_res_rel_dirf(struct httpsrvdev_inst* inst, char* fmt, ...) {
-    RESOLVE_FMT_ARGS;
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
     char resolved_path[512];
     resolve_path(inst, inst->root_path, str, resolved_path);
     return httpsrvdev_res_dir(inst, resolved_path);
 }
 
 bool httpsrvdev_res_rel_file_sys_entryf(struct httpsrvdev_inst* inst, char* fmt, ...) {
-    RESOLVE_FMT_ARGS;
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
     char resolved_path[512];
     resolve_path(inst, inst->root_path, str, resolved_path);
     return httpsrvdev_res_file_sys_entry(inst, resolved_path);
@@ -762,6 +805,52 @@ static uint64_t ext_encodings[] = {
                                         ('r'<<16) | ('t'<< 8) | ('f'<< 0),
                                         ('c'<<16) | ('s'<< 8) | ('h'<< 0),
 
+    // Other programmer extensions are treated as text.
+    // TODO: Make this togglable because this is useful but also unexpected
+    //       behaviour
+                            // Markdown
+                                                    ('m'<< 8) | ('d'<< 0),
+                            // Org mode
+                                        ('o'<<16) | ('r'<< 8) | ('g'<< 0),
+                            // Ascii Doc
+                            ('a'<<16) | ('d'<<16) | ('o'<< 8) | ('c'<< 0),
+                            // C
+                                                                ('c'<< 0),
+                                                                ('h'<< 0),
+                            // Python
+                                                    ('p'<< 8) | ('y'<< 0),
+                            // C++
+                                        ('c'<<16) | ('p'<< 8) | ('p'<< 0),
+                                        ('c'<<16) | ('+'<< 8) | ('+'<< 0),
+                                        ('h'<<16) | ('p'<< 8) | ('p'<< 0),
+                                        ('h'<<16) | ('+'<< 8) | ('+'<< 0),
+                            // Go
+                                                    ('g'<< 8) | ('o'<< 0),
+                            // Java
+                            ('j'<<16) | ('a'<<16) | ('v'<< 8) | ('a'<< 0),
+                            // Zig
+                                        ('z'<<16) | ('i'<< 8) | ('g'<< 0),
+                            // Odin
+                            ('o'<<16) | ('d'<<16) | ('i'<< 8) | ('n'<< 0),
+                            // Odin
+                                                    ('h'<< 8) | ('a'<< 0),
+                            // Jai
+                                        ('j'<<16) | ('a'<< 8) | ('i'<< 0),
+                            // JavaScript -- Node's CommonJS
+                                        ('c'<<16) | ('j'<< 8) | ('s'<< 0),
+                            // Mojo
+                            ('m'<<16) | ('o'<<16) | ('j'<< 8) | ('o'<< 0),
+                                // NOTE: We're not going to support
+                                //       emoji extensions unless they
+                                //       become common... It's just
+                                //       cringe marketing that makes
+                                //       building software harder
+                            // Ruby
+                                                    ('r'<< 8) | ('b'<< 0),
+                            // This list is non-exhaustive -- just stuff
+                            // that I might use. Feel free to extend /
+                            // submit an issue/PR as needed
+
     // Misc -------------------------------------------------------------
                                         ('o'<<16) | ('g'<< 8) | ('x'<< 0),
                                         ('v'<<16) | ('s'<< 8) | ('d'<< 0),
@@ -857,6 +946,29 @@ static char* mime_types[] = {
     "application/x-sh",
     "application/rtf",
     "application/x-csh",
+
+    // Other programmer extensions are treated as text.
+    // TODO: Make this togglable because this is useful but also unexpected
+    //       behaviour
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
+    "text/plain",
 
     // Misc
     "application/ogg",
