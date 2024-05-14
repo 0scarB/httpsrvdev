@@ -11,10 +11,18 @@
 #define WARN 2
 #define ERR  3
 
-char   cli_args        [16][256];
-bool   cli_args_handled[16];
-size_t cli_args_count;
-char usage_msg[4096];
+char   argv        [16][256];
+bool   argv_handled[16];
+bool   argv_is_path[16] = {false};
+size_t argv_paths_count = 0;
+size_t argc;
+struct httpsrvdev_inst inst;
+
+void unexpected_err_and_exit() {
+    perror("Unexpected Implementation Error: "
+            "Unexpected log level!");
+    exit(1);
+}
 
 void log_(int log_level, char* msg) {
     FILE* out_file = NULL;
@@ -34,9 +42,7 @@ void log_(int log_level, char* msg) {
             memcpy(prefix, "(httpsrvdev) ERROR: ", prefix_len);
             break;
         default:
-            perror("Unexpected Implementation Error: "
-                    "Unexpected log level!");
-            exit(1);
+            unexpected_err_and_exit();
     }
     fwrite(prefix, prefix_len, 1, out_file);
     fputs(msg, out_file);
@@ -54,14 +60,14 @@ void log_fmt(int log_level, char* fmt, ...) {
     log_(log_level, msg_buf);
 }
 
-int cli_args_find_unhandled_idx(char* short_arg, char* long_arg) {
+int argv_find_unhandled_idx(char* short_arg, char* long_arg) {
     // Iterate through args backwards so the latter args override
     // former when duplicates are allowed.
-    for (int i = cli_args_count - 1; i > -1; --i) {
-        if (cli_args_handled[i]) continue;
+    for (int i = argc - 1; i > -1; --i) {
+        if (argv_handled[i]) continue;
 
-        if (strcmp(long_arg, cli_args[i]) == 0 ||
-            (short_arg != NULL && strcmp(short_arg, cli_args[i]) == 0)
+        if (strcmp(long_arg, argv[i]) == 0 ||
+            (short_arg != NULL && strcmp(short_arg, argv[i]) == 0)
         ) {
             return i;
         }
@@ -69,7 +75,7 @@ int cli_args_find_unhandled_idx(char* short_arg, char* long_arg) {
     return -1;
 }
 
-void cli_args_err_on_duplicate_opts_or_flags(void) {
+void argv_err_on_duplicate_opts_or_flags(void) {
     char* possible_duplicate_opts[][2] = {
         {NULL, "--ip"  },
         {"-p", "--port"},
@@ -84,8 +90,8 @@ void cli_args_err_on_duplicate_opts_or_flags(void) {
         char*  long_opt = possible_duplicate_opts[i][1];
 
         int count = 0;
-        for (size_t j = 0; j < cli_args_count; ++j) {
-            char* arg = cli_args[j];
+        for (size_t j = 0; j < argc; ++j) {
+            char* arg = argv[j];
             if (strcmp( long_opt, arg) == 0 ||
                 (short_opt != NULL && strcmp(short_opt, arg) == 0)
             ) {
@@ -109,18 +115,39 @@ void handle_sigint() {
     exit(0);
 }
 
-int main(int argc, char* argv[]) {
-    // Populate globals
-    for (size_t i = 0; i < argc; ++i) {
-        strcpy(cli_args[i], argv[i]);
-        cli_args_handled[i] = false;
+void res_with_err_page_from_status(size_t status) {
+    switch (status) {
+        case 404:
+            httpsrvdev_res_status_line(&inst, 404);
+            httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
+            httpsrvdev_res_body  (&inst, "File not found!");
+            break;
+        case 500:
+            httpsrvdev_res_status_line(&inst, 500);
+            httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
+            httpsrvdev_res_body  (&inst, "Internal server error!");
+            break;
+        default:
+            unexpected_err_and_exit();
     }
-    cli_args_count = argc;
+}
 
+void res_with_path_or_err(char* path) {
+    if (!httpsrvdev_res_rel_file_sys_entryf(&inst, path)) {
+        if ((inst.err & httpsrvdev_MASK_ERRNO) == ENOENT) {
+            res_with_err_page_from_status(404);
+        } else {
+            res_with_err_page_from_status(500);
+        }
+    }
+}
+
+void handle_cli_args() {
     // Determine the executable's name from the first CLI arg
-    char* this_exe_name = cli_args[0];
-    cli_args_handled[0] = true;
+    char* this_exe_name = argv[0];
+    argv_handled[0] = true;
 
+    char usage_msg[4096];
     sprintf(usage_msg,
         "%s [OPTIONS/FLAGS] [PATH1 PATH2 ...]\n"
         "\n"
@@ -160,64 +187,57 @@ int main(int argc, char* argv[]) {
 
     // Dsiplay the usage message if -h or --help are provided anywhere in the
     // CLI args
-    if (cli_args_find_unhandled_idx("-h", "--help") != -1) {
+    if (argv_find_unhandled_idx("-h", "--help") != -1) {
         puts(usage_msg);
-        return EXIT_SUCCESS;
+        exit(0);
     }
 
     // Check for duplicate CLI args if --override-opts is not provided
-    int override_opts_flag_idx = cli_args_find_unhandled_idx(NULL, "--override-opts");
+    int override_opts_flag_idx = argv_find_unhandled_idx(NULL, "--override-opts");
     if (override_opts_flag_idx == -1) {
-        cli_args_err_on_duplicate_opts_or_flags();
+        argv_err_on_duplicate_opts_or_flags();
     } else {
-        cli_args_handled[override_opts_flag_idx] = true;
+        argv_handled[override_opts_flag_idx] = true;
     }
 
-    inst = httpsrvdev_init_begin();
-    signal(SIGINT, handle_sigint);
-
     // Check for and handle IPv4 CLI option
-    int ip_opt_idx = cli_args_find_unhandled_idx(NULL, "--ip");
+    int ip_opt_idx = argv_find_unhandled_idx(NULL, "--ip");
     if (ip_opt_idx != -1) {
         int ip_val_idx = ip_opt_idx + 1;
-        if (ip_val_idx >= cli_args_count) {
+        if (ip_val_idx >= argc) {
             // TODO: Error message
-            return EXIT_FAILURE;
+            exit(1);
         }
-        if (!httpsrvdev_ipv4_from_str(&inst, cli_args[ip_val_idx])) {
+        if (!httpsrvdev_ipv4_from_str(&inst, argv[ip_val_idx])) {
             // TODO: Error message
-            return EXIT_FAILURE;
+            exit(1);
         }
-        cli_args_handled[ip_opt_idx] = true;
-        cli_args_handled[ip_val_idx] = true;
+        argv_handled[ip_opt_idx] = true;
+        argv_handled[ip_val_idx] = true;
     }
 
     // Check for and handle port CLI option
-    int port_opt_idx = cli_args_find_unhandled_idx("-p", "--port");
+    int port_opt_idx = argv_find_unhandled_idx("-p", "--port");
     if (port_opt_idx != -1) {
         int port_val_idx = port_opt_idx + 1;
-        if (port_val_idx >= cli_args_count) {
+        if (port_val_idx >= argc) {
             // TODO: Error message
-            return EXIT_FAILURE;
+            exit(1);
         }
-        if (!httpsrvdev_port_from_str(&inst, cli_args[port_val_idx])) {
+        if (!httpsrvdev_port_from_str(&inst, argv[port_val_idx])) {
             // TODO: Error message
-            return EXIT_FAILURE;
+            exit(1);
         }
-        cli_args_handled[port_opt_idx] = true;
-        cli_args_handled[port_val_idx] = true;
+        argv_handled[port_opt_idx] = true;
+        argv_handled[port_val_idx] = true;
     }
-
-    httpsrvdev_init_end(&inst);
 
     // Assume that remaining unhandled args are PATHs and check that
     // all path args are at the end unless --override-opts is provided.
-    bool   cli_args_is_path[sizeof(cli_args)/sizeof(cli_args[0])];
-    size_t cli_args_paths_count = 0;
     bool last_was_handled = false;
     if (override_opts_flag_idx == -1) {
-        for (int i = cli_args_count - 1; i > -1; --i) {
-            if (cli_args_handled[i]) {
+        for (int i = argc - 1; i > -1; --i) {
+            if (argv_handled[i]) {
                 last_was_handled = true;
             } else {
                 if (last_was_handled) {
@@ -225,121 +245,123 @@ int main(int argc, char* argv[]) {
                                  "after options and flags (unless --override-opts "
                                  "is provided). Non-option/-flag argument "
                                  "'%s' comes before option/flag '%s'!",
-                                 cli_args[i], cli_args[i + 1]);
-                    return EXIT_FAILURE;
+                                 argv[i], argv[i + 1]);
+                    exit(1);
                 }
-                cli_args_is_path[i] = true;
-                ++cli_args_paths_count;
+                argv_is_path[i] = true;
+                ++argv_paths_count;
             }
         }
     } else {
-        for (size_t i = 0; i < cli_args_count; ++i) {
-            if (!cli_args_handled[i]) {
-                cli_args_is_path[i] = true;
-                ++cli_args_paths_count;
+        for (size_t i = 0; i < argc; ++i) {
+            if (!argv_handled[i]) {
+                argv_is_path[i] = true;
+                ++argv_paths_count;
             }
         }
     }
+}
 
-    httpsrvdev_start(&inst);
-    log_fmt(INFO, "Listening...");
+int main(int argc_local, char* argv_local[]) {
+    // Populate globals
+    for (size_t i = 0; i < argc_local; ++i) {
+        strcpy(argv[i], argv_local[i]);
+        argv_handled[i] = false;
+    }
+    argc = argc_local;
 
-    size_t route_buf_len = 512;
-    char   route_buf[route_buf_len];
-    if (cli_args_paths_count < 2) {
-        if (cli_args_paths_count == 1) {
-            for (size_t i = 0; i < cli_args_count; ++i) {
-                if (cli_args_is_path[i]) {
-                    char* path = cli_args[i];
-                    if (path[0] == '/') {
-                        strcpy(inst.root_path, "/");
-                    } else {
-                        strcpy(inst.root_path, path);
-                    }
-                    break;
-                }
-            }
-        }
-        while (httpsrvdev_res_begin(&inst)) {
-            // TODO: Add proper target parsing
-            // TODO: HTTP error response when slice is larger than route_buf_len
-            httpsrvdev_req_slice_copy_to_buf(
-                    &inst, &inst.req_target_slice,
-                    route_buf, route_buf_len);
-            char* path;
-            if (route_buf[0] == '/') {
-                path = route_buf + 1;
-            } else {
-                path = route_buf;
-            }
+    // Initialize httpsrvdev instance from CLI args
+    inst = httpsrvdev_init_begin(); {
+        handle_cli_args();
+    }; httpsrvdev_init_end(&inst);
 
-            if (!httpsrvdev_res_rel_file_sys_entryf(&inst, path)) {
-                if ((inst.err & httpsrvdev_MASK_ERRNO) == ENOENT) {
-                    httpsrvdev_res_status_line(&inst, 404);
-                    httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
-                    httpsrvdev_res_body  (&inst, "File not found!");
-                } else {
-                    httpsrvdev_res_status_line(&inst, 500);
-                    httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
-                    httpsrvdev_res_body  (&inst, "Internal server error!");
-                }
-            }
-        }
-    } else {
-        char* set_root_path_route_prefix = "set_root_";
+    signal(SIGINT, handle_sigint);
+
+    // Run file server
+    httpsrvdev_start(&inst); {
+        log_fmt(INFO, "Listening...");
+
+        size_t route_buf_len = 512;
+        char   route_buf[route_buf_len];
         bool  root_path_is_set = false;
-
+        // Main loop
         while (httpsrvdev_res_begin(&inst)) {
-            // TODO: Add proper target parsing
-            // TODO: HTTP error response when slice is larger than route_buf_len
+            // Set the "route" from the HTTP target
+            //    TODO: Add proper target parsing
+            //    TODO: HTTP error response when slice is larger than route_buf_len
             httpsrvdev_req_slice_copy_to_buf(
                     &inst, &inst.req_target_slice,
                     route_buf, route_buf_len);
-            char* rel_route;
+            char* route = route_buf;
             if (route_buf[0] == '/') {
-                rel_route = route_buf + 1;
-            } else {
-                rel_route = route_buf;
+                ++route;
             }
 
+            // After the root path has been determined, use route as a file system
+            // path and respond with the corresponding file system entry at that path
+            // or an error.
             if (root_path_is_set) {
-                if (!httpsrvdev_res_rel_file_sys_entryf(&inst, rel_route)) {
-                    if ((inst.err & httpsrvdev_MASK_ERRNO) == ENOENT) {
-                        httpsrvdev_res_status_line(&inst, 404);
-                        httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
-                        httpsrvdev_res_body  (&inst, "File not found!");
-                    } else {
-                        httpsrvdev_res_status_line(&inst, 500);
-                        httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
-                        httpsrvdev_res_body  (&inst, "Internal server error!");
+                res_with_path_or_err(route);
+            // If the root path is unset and no CLI path arguments were provided,
+            // set the root path to the CWD (current working directory) and serve a
+            // directory listing of the CWD.
+            } else if (argv_paths_count <= 0) {
+                strcpy(inst.root_path, ".");
+                res_with_path_or_err(route);
+            // If one CLI path argument was provided then set the root path to the
+            // value of that argument and attempt to serve the file system
+            // entry at that root path.
+            } else if (argv_paths_count == 1) {
+                for (size_t i = 0; i < argc; ++i) {
+                    if (argv_is_path[i]) {
+                        if (argv[i][0] == '/') {
+                            strcpy(inst.root_path, "/");
+                        } else {
+                            strcpy(inst.root_path, argv[i]);
+                        }
+                        break;
                     }
                 }
-            } else if (rel_route[0] == '\0') {
-                httpsrvdev_res_listing_begin(&inst);
-                for (size_t i = 0; i < cli_args_count; ++i) {
-                    if (!cli_args_is_path[i]) continue;
-
-                    char* path = cli_args[i];
-                    char  link[512];
-                    sprintf(link, "%s%s", set_root_path_route_prefix, path);
-                    httpsrvdev_res_listing_entry(&inst, link, path);
-                }
-                httpsrvdev_res_listing_end(&inst);
-            } else if (strcmp(rel_route, set_root_path_route_prefix) >= 0) {
-                char* root_path = rel_route + strlen(set_root_path_route_prefix);
-                strcpy(inst.root_path, root_path);
-                root_path_is_set = true;
-
-                httpsrvdev_res_status_line(&inst, 303);
-                httpsrvdev_res_header     (&inst, "Location", "/");
-                httpsrvdev_res_end        (&inst);
+                res_with_path_or_err(route);
+            // If two or more CLI path arguments are provided then:
+            // 1. Serve a listing page allowing you to choose the between the
+            //    path arguments.
+            // 2. Once a path is chosen, set it to the root path.
+            // 3. Redirect to root ROUTE (not path) "/" and proceed with "normal"
+            //    server execution, with the root path set -- see first if-branch
             } else {
-                httpsrvdev_res_status_line(&inst, 404);
-                httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
-                httpsrvdev_res_body  (&inst, "File not found!");
+                bool is_root_route = route[0] == '\0';
+
+                // Serve a "choices" listing page at the root route
+                // where each entry links to `set_root_<CLI path arg>`
+                if (is_root_route) {
+                    httpsrvdev_res_listing_begin(&inst);
+                    for (size_t i = 0; i < argc; ++i) {
+                        if (!argv_is_path[i]) continue;
+
+                        char* path = argv[i];
+                        char  link[512];
+                        sprintf(link, "%s%s", "set_root_", path);
+                        httpsrvdev_res_listing_entry(&inst, link, path);
+                    }
+                    httpsrvdev_res_listing_end(&inst);
+                // If the route is `set_root_<CLI path arg>`, set the root
+                // path to "CLI path arg" and redirect to the root route "/",
+                // continuing with "normal" server execution
+                } else if (strcmp(route, "set_root_") >= 0) {
+                    char* root_path = route + strlen("set_root_");
+                    strcpy(inst.root_path, root_path);
+                    root_path_is_set = true;
+
+                    httpsrvdev_res_status_line(&inst, 303);
+                    httpsrvdev_res_header     (&inst, "Location", "/");
+                    httpsrvdev_res_end        (&inst);
+                } else {
+                    res_with_err_page_from_status(404);
+                }
             }
         }
-    }
+    }; httpsrvdev_stop(&inst);
 
     return EXIT_SUCCESS;
 }
