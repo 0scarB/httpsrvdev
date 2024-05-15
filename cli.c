@@ -277,13 +277,24 @@ int main(int argc_local, char* argv_local[]) {
 
     signal(SIGINT, handle_sigint);
 
+    char*  paths[argv_paths_count + 1];
+    size_t paths_count = 0;
+    for (size_t i = 0; i < argc; ++i) {
+        if (argv_is_path[i]) {
+            paths[paths_count++] = argv[i];
+        }
+    }
+    if (paths_count == 0) {
+        paths[paths_count++] = ".";
+    }
+
     // Run file server
     httpsrvdev_start(&inst); {
         log_fmt(INFO, "Listening...");
 
-        size_t route_buf_len = 512;
-        char   route_buf[route_buf_len];
-        bool  root_path_is_set = false;
+        size_t abs_route_buf_len = 512;
+        char   abs_route[abs_route_buf_len];
+        char*  rel_route = abs_route + 1;
         // Main loop
         while (httpsrvdev_res_begin(&inst)) {
             // Set the "route" from the HTTP target
@@ -291,71 +302,43 @@ int main(int argc_local, char* argv_local[]) {
             //    TODO: HTTP error response when slice is larger than route_buf_len
             httpsrvdev_req_slice_copy_to_buf(
                     &inst, &inst.req_target_slice,
-                    route_buf, route_buf_len);
-            char* route = route_buf;
-            if (route_buf[0] == '/') {
-                ++route;
-            }
+                    abs_route, abs_route_buf_len);
 
-            // After the root path has been determined, use route as a file system
-            // path and respond with the corresponding file system entry at that path
-            // or an error page.
-            if (root_path_is_set) {
-                res_with_path_or_err(route);
-            // If the root path is unset and no CLI path arguments were provided,
-            // set the root path to the CWD (current working directory) and serve a
-            // directory listing of the CWD.
-            } else if (argv_paths_count <= 0) {
-                strcpy(inst.root_path, ".");
-                res_with_path_or_err(route);
-            // If one CLI path argument was provided then set the root path to the
-            // value of that argument and attempt to serve the file system
-            // entry at that root path.
-            } else if (argv_paths_count == 1) {
-                for (size_t i = 0; i < argc; ++i) {
-                    if (argv_is_path[i]) {
-                        strcpy(inst.root_path, argv[i]);
-                        break;
-                    }
-                }
-                res_with_path_or_err(route);
-            // If two or more CLI path arguments are provided then:
-            // 1. Serve a listing page allowing you to choose the between the
-            //    path arguments.
-            // 2. Once a path is chosen, set it to the root path.
-            // 3. Redirect to root ROUTE (not path) "/" and proceed with "normal"
-            //    server execution, with the root path set -- see first if-branch
+            if (paths_count == 1) {
+                strcpy(inst.root_path, paths[0]);
+                res_with_path_or_err(rel_route);
             } else {
-                bool is_root_route = route[0] == '\0';
+                bool is_root_route = rel_route[0] == '\0';
 
-                // Serve a "choices" listing page at the root route
-                // where each entry links to `set_root_<CLI path arg>`
                 if (is_root_route) {
                     httpsrvdev_res_listing_begin(&inst);
-                    for (size_t i = 0; i < argc; ++i) {
-                        if (!argv_is_path[i]) continue;
+                    for (size_t i = 0; i < paths_count; ++i) {
+                        char* path = paths[i];
+                        char resolved_path[512];
+                        realpath(path, resolved_path);
 
-                        char* path = argv[i];
-                        char  link[512];
-                        sprintf(link, "%s%s", "set_root_", path);
-                        httpsrvdev_res_listing_entry(&inst, link, path);
+                        httpsrvdev_res_listing_entry(&inst, resolved_path, path);
                     }
                     httpsrvdev_res_listing_end(&inst);
-                // If the route is `set_root_<CLI path arg>`, set the root
-                // path to "CLI path arg" and redirect to the root route "/",
-                // continuing with "normal" server execution
-                } else if (strcmp(route, "set_root_") >= 0) {
-                    char* root_path = route + strlen("set_root_");
-                    strcpy(inst.root_path, root_path);
-                    root_path_is_set = true;
-
-                    httpsrvdev_res_status_line(&inst, 303);
-                    httpsrvdev_res_header     (&inst, "Location", "/");
-                    httpsrvdev_res_end        (&inst);
                 } else {
+                    for (size_t i = 0; i < paths_count; ++i) {
+                        char* path = paths[i];
+                        char resolved_path[512];
+                        realpath(path, resolved_path);
+
+                        if (strncmp(resolved_path, abs_route, strlen(resolved_path))
+                            == 0
+                        ) {
+                            strcpy(inst.root_path, "");
+                            res_with_path_or_err(abs_route);
+                            goto next_main_loop_iter;
+                        }
+                    }
+
                     res_with_err_page_from_status(404);
                 }
             }
+            next_main_loop_iter: continue;
         }
     }; httpsrvdev_stop(&inst);
 

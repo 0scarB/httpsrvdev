@@ -25,7 +25,7 @@
     // Utilities for use during development
 
     void printf_with_escapes(char* fmt, ...) {
-        SPRINTF_TO_STR_FROM_FMT_AND_VARGS(1024*1024);
+        SPRINTF_TO_STR_FROM_FMT_AND_VARGS(16*1024);
         for (size_t i = 0; i < strlen(str); ++i) {
             char c = str[i];
             switch (c) {
@@ -403,31 +403,48 @@ static bool path_rel_to_root_to_path_with_root(struct httpsrvdev_inst* inst,
 ) {
     if (path[0] == '/') {
         strcpy(result_path, path);
+        return true;
     }
 
+    // Join root and path
     char full_path[strlen(path) + strlen(inst->root_path) + 2];
-    char* base_path_end_ptr = stpcpy(full_path, inst->root_path);
-    *(base_path_end_ptr++) = '/';
-    strcpy(base_path_end_ptr, path);
+    char* path_end_ptr = stpcpy(full_path, inst->root_path);
+    *(path_end_ptr++) = '/';
+    path_end_ptr = stpcpy(path_end_ptr, path);
+
+    // Remove trailing '/'
+    if (*(path_end_ptr - 1) == '/') {
+        *(path_end_ptr - 1) = '\0';
+    }
 
     realpath(full_path, result_path);
 
-    return result_path;
+    return true;
 }
 
-bool path_with_root_to_path_rel_to_root(struct httpsrvdev_inst* inst,
+static bool path_with_root_to_path_rel_to_root(struct httpsrvdev_inst* inst,
     char* path, char* result_path
 ) {
-    char root_path[strlen(inst->root_path) + 1];
-    char path_resolved[strlen(path) + 1];
-    realpath(inst->root_path, root_path);
+    char path_resolved[1024];
+    path_resolved[0] = '\0';
     realpath(path, path_resolved);
+
+    if (*inst->root_path == '\0') {
+        strcpy(result_path, path_resolved);
+        return true;
+    }
+
+    char root_path[1024];
+    realpath(inst->root_path, root_path);
 
     size_t root_path_len = strlen(root_path);
 
-    if (strncmp(root_path, path_resolved, root_path_len) != 0) return false;
+    if (root_path_len > 0 &&
+        strncmp(root_path, path_resolved, root_path_len) != 0
+    ) return false;
 
     strcpy(result_path, path_resolved + root_path_len);
+
     return true;
 }
 
@@ -493,7 +510,7 @@ bool httpsrvdev_res_file(struct httpsrvdev_inst* inst, char* path) {
 }
 
 bool httpsrvdev_res_dir(struct httpsrvdev_inst* inst, char* dir_path) {
-    char entry_path_buf[512];
+    char entry_path_buf[1024];
     if (!path_with_root_to_path_rel_to_root(inst, dir_path, entry_path_buf))
         return false;
     char* entry_name_in_path_start = entry_path_buf + strlen(entry_path_buf);
@@ -565,7 +582,7 @@ bool httpsrvdev_res_rel_dir(struct httpsrvdev_inst* inst, char* path) {
     return httpsrvdev_res_dir(inst, resolved_path);
 }
 
-bool httpsrvdev_res_rel_file_sys_entry (struct httpsrvdev_inst* inst, char* path) {
+bool httpsrvdev_res_rel_file_sys_entry(struct httpsrvdev_inst* inst, char* path) {
     char resolved_path[512];
     path_rel_to_root_to_path_with_root(inst, path, resolved_path);
     return httpsrvdev_res_dir(inst, resolved_path);
@@ -605,25 +622,24 @@ bool httpsrvdev_res_listing_begin(struct httpsrvdev_inst* inst) {
 bool httpsrvdev_res_listing_entry(struct httpsrvdev_inst* inst,
     char* path, char* link_text
 ) {
-    memcpy(inst->listing_res_content + inst->listing_res_content_len,
+    bool path_is_abs = path[0] == '/';
+    char* anchor_target;
+    if (path_is_abs) {
+        anchor_target = "_top";
+    } else {
+        anchor_target = "_self";
+    }
+    inst->listing_res_content_len +=
+        sprintf(inst->listing_res_content + inst->listing_res_content_len,
             "<a style=\"color:#FFF;text-decoration:underline;"
-            "display:block;margin-bottom:0.5em\" href=\"", 88);
-    inst->listing_res_content_len += 88;
-
-    size_t path_len = strlen(path);
-    memcpy(inst->listing_res_content + inst->listing_res_content_len, path, path_len);
-    inst->listing_res_content_len += path_len;
-
-    memcpy(inst->listing_res_content + inst->listing_res_content_len, "\">", 2);
-    inst->listing_res_content_len += 2;
-
-    size_t link_text_len = strlen(link_text);
-    memcpy(inst->listing_res_content + inst->listing_res_content_len,
-            link_text, link_text_len);
-    inst->listing_res_content_len += link_text_len;
-
-    memcpy(inst->listing_res_content + inst->listing_res_content_len, "</a>\n", 5);
-    inst->listing_res_content_len += 5;
+                       "display:block;margin-bottom:0.5em\" "
+                "href=\"%s\" "
+                "target=\"%s\" "
+            ">%s</a>",
+            path,
+            anchor_target,
+            link_text
+        );
 
     return true;
 }

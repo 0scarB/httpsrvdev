@@ -61,7 +61,7 @@ struct httpsrvdev_inst {
 
     char* default_file_mime_type;
 
-    char   listing_res_content[2048];
+    char   listing_res_content[32*1024];
     size_t listing_res_content_len;
 
     char root_path[512];
