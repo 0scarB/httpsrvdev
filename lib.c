@@ -479,8 +479,9 @@ bool httpsrvdev_res_file(struct httpsrvdev_inst* inst, char* path) {
 
     char content_length_value_buf[20];
     sprintf(content_length_value_buf, "%d", content_length);
-    if (!httpsrvdev_res_status_line(inst, 200                                  ) ||
-        !httpsrvdev_res_header(inst, "Content-Type"  , mime_type               ) ||
+    if (!httpsrvdev_res_status_line(inst, 200) ||
+        !httpsrvdev_res_headerf(inst,
+            "Content-Type"  , "%s; charset=utf-8", mime_type) ||
         !httpsrvdev_res_header(inst, "Content-Length", content_length_value_buf) ||
         !httpsrvdev_res_header(inst, "Connection"    , "Keep-Alive")
     ) {
@@ -610,11 +611,10 @@ bool httpsrvdev_res_rel_file_sys_entryf(struct httpsrvdev_inst* inst, char* fmt,
 }
 
 bool httpsrvdev_res_listing_begin(struct httpsrvdev_inst* inst) {
-    inst->listing_res_content_len = 0;
-    memcpy(inst->listing_res_content + inst->listing_res_content_len,
-            "<!DOCTYPE html>\n"
-            "<html><body style=\"background-color:#000;margin:2em\">\n", 70);
-    inst->listing_res_content_len += 70;
+    inst->listing_res_content_len = sprintf(inst->listing_res_content,
+        "<!DOCTYPE html>\n"
+        "<html><body style=\"font-family:sans-serif;\n"
+        "background-color:#000;margin:2em\">\n");
 
     return true;
 }
@@ -629,29 +629,29 @@ bool httpsrvdev_res_listing_entry(struct httpsrvdev_inst* inst,
     } else {
         anchor_target = "_self";
     }
-    inst->listing_res_content_len +=
-        sprintf(inst->listing_res_content + inst->listing_res_content_len,
-            "<a style=\"color:#FFF;text-decoration:underline;"
-                       "display:block;margin-bottom:0.5em\" "
-                "href=\"%s\" "
-                "target=\"%s\" "
-            ">%s</a>",
-            path,
-            anchor_target,
-            link_text
-        );
+    inst->listing_res_content_len += sprintf(
+        inst->listing_res_content + inst->listing_res_content_len,
+        "<a style=\"color:#FFF;text-decoration:underline;"
+                   "display:block;margin-bottom:0.5em\" "
+            "href=\"%s\" "
+            "target=\"%s\" "
+        ">%s</a>",
+        path, anchor_target, link_text);
 
     return true;
 }
 
 bool httpsrvdev_res_listing_end(struct httpsrvdev_inst* inst) {
-    memcpy(inst->listing_res_content + inst->listing_res_content_len, "</body></html>", 14);
-    inst->listing_res_content_len += 14;
+    inst->listing_res_content_len += sprintf(
+        inst->listing_res_content + inst->listing_res_content_len,
+        "</body></html>");
     inst->listing_res_content[inst->listing_res_content_len] = '\0';
 
-    if (!httpsrvdev_res_status_line(inst, 200                        )) return false;
-    if (!httpsrvdev_res_header     (inst, "Content-Type", "text/html")) return false;
-    if (!httpsrvdev_res_body       (inst, inst->listing_res_content  )) return false;
+    if (!httpsrvdev_res_status_line(inst, 200) ||
+        !httpsrvdev_res_header     (inst, "Content-Type", "text/html; charset=utf-8") ||
+        !httpsrvdev_res_body       (inst, inst->listing_res_content)
+    )
+        return false;
 
     return true;
 }

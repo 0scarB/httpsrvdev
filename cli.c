@@ -139,12 +139,12 @@ void res_with_err_page_from_status(size_t status) {
     switch (status) {
         case 404:
             httpsrvdev_res_status_line(&inst, 404);
-            httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
+            httpsrvdev_res_header(&inst, "Content-Type", "text/plain; charset=utf-8");
             httpsrvdev_res_body  (&inst, "File not found!");
             break;
         case 500:
             httpsrvdev_res_status_line(&inst, 500);
-            httpsrvdev_res_header(&inst, "Content-Type", "text/plain");
+            httpsrvdev_res_header(&inst, "Content-Type", "text/plain; charset=utf-8");
             httpsrvdev_res_body  (&inst, "Internal server error!");
             break;
         default:
@@ -164,7 +164,8 @@ void res_with_path_or_err(char* path) {
 
 void res_with_stdin(char* stdin_buf) {
     httpsrvdev_res_status_line(&inst, 200);
-    httpsrvdev_res_header(&inst, "Content-Type", stdin_mime_type);
+    httpsrvdev_res_headerf(&inst,
+            "Content-Type", "%s; charset=utf-8", stdin_mime_type);
     httpsrvdev_res_body(&inst, stdin_buf);
 }
 
