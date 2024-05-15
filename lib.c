@@ -489,21 +489,24 @@ bool httpsrvdev_res_file(struct httpsrvdev_inst* inst, char* path) {
         return false;
     }
 
-    // TODO: Read and send in chunks
-    char file_content_buf[content_length];
-    if (read(fd, file_content_buf, content_length) == -1) {
-        inst->err = httpsrvdev_COULD_NOT_READ_FILE | (errno & httpsrvdev_MASK_ERRNO);
-        close(fd);
-        return false;
+    if (!httpsrvdev_res_send_n(inst, "\r\n", 2)) return false;
+
+    size_t chunk_size = 2048;
+    char   chunk[chunk_size];
+    while (true) {
+        int n_bytes_read = read(fd, chunk, chunk_size);
+        if (n_bytes_read == -1) {
+            close(fd);
+            return false;
+        }
+        if (!httpsrvdev_res_send_n(inst, chunk, n_bytes_read)) return false;
+        if (n_bytes_read < chunk_size) break;
     }
 
     if (close(fd) == -1) {
         inst->err = httpsrvdev_COULD_NOT_CLOSE_FILE | (errno & httpsrvdev_MASK_ERRNO);
         return false;
     }
-
-    if (!httpsrvdev_res_send_n(inst, "\r\n"          , 2             )) return false;
-    if (!httpsrvdev_res_send_n(inst, file_content_buf, content_length)) return false;
 
     if (!httpsrvdev_res_end(inst)) return false;
 
