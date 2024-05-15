@@ -2,6 +2,10 @@
 
 set -eu
 
-cc -ggdb -DDEV -Wall -Werror -o cli lib.c cli.c
-./cli $@
+project_dir="$( dirname "$( realpath "$0" )" )"
+
+cc -ggdb -DDEV -Wall -Werror \
+    -o "$project_dir/cli" \
+    "$project_dir/lib.c" "$project_dir/cli.c"
+"$project_dir/cli" $@
 

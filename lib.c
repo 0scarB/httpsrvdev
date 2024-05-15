@@ -398,114 +398,36 @@ bool httpsrvdev_res_body(struct httpsrvdev_inst* inst, char* body) {
     return true;
 }
 
-static bool resolve_path(struct httpsrvdev_inst* inst,
-    char* base_path, char* path, char* resolved_path
+static bool path_rel_to_root_to_path_with_root(struct httpsrvdev_inst* inst,
+    char* path, char* result_path
 ) {
-    char full_path[512];
     if (path[0] == '/') {
-        strcpy(full_path, path);
-    } else {
-        char* base_path_end_ptr = stpcpy(full_path, base_path);
-        *(base_path_end_ptr++) = '/';
-        strcpy(base_path_end_ptr, path);
+        strcpy(result_path, path);
     }
 
-    bool is_abs = false;
-    size_t i = 0;
-    size_t full_path_len = strlen(full_path);
-    size_t   path_stack_max_size = 16;
-    size_t   path_stack_size     = 0;
-    uint16_t path_stack[path_stack_max_size][2];
+    char full_path[strlen(path) + strlen(inst->root_path) + 2];
+    char* base_path_end_ptr = stpcpy(full_path, inst->root_path);
+    *(base_path_end_ptr++) = '/';
+    strcpy(base_path_end_ptr, path);
 
-    if (full_path_len == 0) return false;
+    realpath(full_path, result_path);
 
-    if (full_path[i] == '/') {
-        is_abs = true;
-        ++i;
-    }
-
-    for (size_t j = 0; j < path_stack_max_size; ++j) {
-        uint16_t slice_start = i;
-        uint16_t slice_len   = 0;
-        while (i < full_path_len && full_path[i] != '/') {
-            ++slice_len;
-            ++i;
-        }
-
-        if (slice_len == 0) {
-            if (i >= full_path_len - 1) break;
-            return false;
-        } else if (slice_len == 1 && full_path[slice_start] == '.') {
-            // Do nothing
-        } else if (slice_len == 2 &&
-            full_path[slice_start] == '.' && full_path[slice_start + 1] == '.'
-        ) {
-            if (path_stack_size == 0) return false;
-            --path_stack_size;
-        } else {
-            path_stack[path_stack_size][0] = slice_start;
-            path_stack[path_stack_size][1] = slice_len;
-            ++path_stack_size;
-        }
-
-        if (i >= full_path_len) break;
-
-        ++i;
-    }
-
-    char* ptr = resolved_path;
-    if (is_abs) {
-        *(ptr++) = '/';
-    } else {
-        *(ptr++) = '.';
-        *(ptr++) = '/';
-    }
-    for (size_t l = 0; l < path_stack_size; ++l) {
-        ptr = stpncpy(ptr, full_path + path_stack[l][0], path_stack[l][1]);
-        if (l < path_stack_size - 1) {
-            *(ptr++) = '/';
-        }
-    }
-    if (ptr == resolved_path) {
-        *(ptr++) = '.';
-    }
-    *ptr = '\0';
-
-    return resolved_path;
+    return result_path;
 }
 
-bool path_relative_to(struct httpsrvdev_inst* inst,
-    char* base_path, char* path, char* rel_path
+bool path_with_root_to_path_rel_to_root(struct httpsrvdev_inst* inst,
+    char* path, char* result_path
 ) {
-    size_t path_len = strlen(path);
+    char root_path[strlen(inst->root_path) + 1];
+    char path_resolved[strlen(path) + 1];
+    realpath(inst->root_path, root_path);
+    realpath(path, path_resolved);
 
-    if (path_len > 0 && path[0] == '/') {
-        strcpy(rel_path, path);
-        return true;
-    }
-    if (path_len == 1 && path[0] == '.') {
-        ++path;
-        path_len = 0;
-    }
-    if (path_len >= 2 && path[0] == '.' && path[1] == '/') {
-        path += 2;
-        path_len -= 2;
-    }
+    size_t root_path_len = strlen(root_path);
 
-    size_t base_path_len = strlen(base_path);
+    if (strncmp(root_path, path_resolved, root_path_len) != 0) return false;
 
-    if (base_path_len == 1 && base_path[0] == '.') {
-        ++base_path;
-        base_path_len = 0;
-    }
-    if (base_path_len >= 2 && base_path[0] == '.' && base_path[1] == '/') {
-        base_path += 2;
-        base_path_len -= 2;
-    }
-
-    if (strncmp(base_path, path, base_path_len) != 0) return false;
-
-    strcpy(rel_path, path + base_path_len);
+    strcpy(result_path, path_resolved + root_path_len);
     return true;
 }
 
@@ -572,7 +494,8 @@ bool httpsrvdev_res_file(struct httpsrvdev_inst* inst, char* path) {
 
 bool httpsrvdev_res_dir(struct httpsrvdev_inst* inst, char* dir_path) {
     char entry_path_buf[512];
-    if (!path_relative_to(inst, inst->root_path, dir_path, entry_path_buf)) return false;
+    if (!path_with_root_to_path_rel_to_root(inst, dir_path, entry_path_buf))
+        return false;
     char* entry_name_in_path_start = entry_path_buf + strlen(entry_path_buf);
     if (*(entry_name_in_path_start - 1) != '/') {
         *entry_name_in_path_start = '/';
@@ -632,40 +555,40 @@ bool httpsrvdev_res_file_sys_entryf(struct httpsrvdev_inst* inst, char* fmt, ...
 
 bool httpsrvdev_res_rel_file(struct httpsrvdev_inst* inst, char* path) {
     char resolved_path[512];
-    resolve_path(inst, inst->root_path, path, resolved_path);
+    path_rel_to_root_to_path_with_root(inst, path, resolved_path);
     return httpsrvdev_res_file(inst, resolved_path);
 }
 
 bool httpsrvdev_res_rel_dir(struct httpsrvdev_inst* inst, char* path) {
     char resolved_path[512];
-    resolve_path(inst, inst->root_path, path, resolved_path);
+    path_rel_to_root_to_path_with_root(inst, path, resolved_path);
     return httpsrvdev_res_dir(inst, resolved_path);
 }
 
 bool httpsrvdev_res_rel_file_sys_entry (struct httpsrvdev_inst* inst, char* path) {
     char resolved_path[512];
-    resolve_path(inst, inst->root_path, path, resolved_path);
+    path_rel_to_root_to_path_with_root(inst, path, resolved_path);
     return httpsrvdev_res_dir(inst, resolved_path);
 }
 
 bool httpsrvdev_res_rel_filef(struct httpsrvdev_inst* inst, char* fmt, ...) {
     SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
     char resolved_path[512];
-    resolve_path(inst, inst->root_path, str, resolved_path);
+    path_rel_to_root_to_path_with_root(inst, str, resolved_path);
     return httpsrvdev_res_file(inst, resolved_path);
 }
 
 bool httpsrvdev_res_rel_dirf(struct httpsrvdev_inst* inst, char* fmt, ...) {
     SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
     char resolved_path[512];
-    resolve_path(inst, inst->root_path, str, resolved_path);
+    path_rel_to_root_to_path_with_root(inst, str, resolved_path);
     return httpsrvdev_res_dir(inst, resolved_path);
 }
 
 bool httpsrvdev_res_rel_file_sys_entryf(struct httpsrvdev_inst* inst, char* fmt, ...) {
     SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
     char resolved_path[512];
-    resolve_path(inst, inst->root_path, str, resolved_path);
+    path_rel_to_root_to_path_with_root(inst, str, resolved_path);
     return httpsrvdev_res_file_sys_entry(inst, resolved_path);
 }
 

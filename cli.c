@@ -299,7 +299,7 @@ int main(int argc_local, char* argv_local[]) {
 
             // After the root path has been determined, use route as a file system
             // path and respond with the corresponding file system entry at that path
-            // or an error.
+            // or an error page.
             if (root_path_is_set) {
                 res_with_path_or_err(route);
             // If the root path is unset and no CLI path arguments were provided,
@@ -314,11 +314,7 @@ int main(int argc_local, char* argv_local[]) {
             } else if (argv_paths_count == 1) {
                 for (size_t i = 0; i < argc; ++i) {
                     if (argv_is_path[i]) {
-                        if (argv[i][0] == '/') {
-                            strcpy(inst.root_path, "/");
-                        } else {
-                            strcpy(inst.root_path, argv[i]);
-                        }
+                        strcpy(inst.root_path, argv[i]);
                         break;
                     }
                 }
