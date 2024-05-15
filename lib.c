@@ -510,7 +510,21 @@ bool httpsrvdev_res_file(struct httpsrvdev_inst* inst, char* path) {
     return true;
 }
 
+static char* index_files[] = {"/index.html", "index.htm"};
+
 bool httpsrvdev_res_dir(struct httpsrvdev_inst* inst, char* dir_path) {
+    for (size_t i = 0; i < sizeof(index_files)/sizeof(index_files[0]); ++i) {
+        char index_file_path[512];
+        strcpy(stpcpy(index_file_path, dir_path), index_files[i]);
+        struct stat index_file_path_stat;
+
+        if (stat(index_file_path, &index_file_path_stat) == -1 ||
+            (index_file_path_stat.st_mode & S_IFMT) != S_IFREG
+        ) continue;
+
+        return httpsrvdev_res_file(inst, index_file_path);
+    }
+
     char entry_path_buf[1024];
     if (!path_with_root_to_path_rel_to_root(inst, dir_path, entry_path_buf))
         return false;
