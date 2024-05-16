@@ -894,6 +894,11 @@ static FileTypeInfo file_type_infos[] = {
         .charset_utf8 = true,
     },
     {
+        .ext_encoding = ('r'<< 8) | ('s'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
         .ext_encoding = ('c'<<16) | ('j'<< 8) | ('s'<< 0),
         .mime_type    = "text/plain",
         .charset_utf8 = true,
@@ -1149,10 +1154,16 @@ bool httpsrvdev_res_rel_file_sys_entryf(struct httpsrvdev_inst* inst, char* fmt,
 }
 
 bool httpsrvdev_res_listing_begin(struct httpsrvdev_inst* inst) {
-    inst->listing_res_content_len = sprintf(inst->listing_res_content,
+    httpsrvdev_res_status_line(inst, 200);
+    httpsrvdev_res_header(inst, "Content-Type", "text/html");
+    httpsrvdev_res_header(inst, "Transfer-Encoding", "chunked");
+    httpsrvdev_res_send_n(inst, "\r\n", 2);
+    char chunk[512];
+    size_t chunk_size = sprintf(chunk,
         "<!DOCTYPE html>\n"
         "<html><body style=\"font-family:sans-serif;\n"
         "background-color:#000;margin:2em\">\n");
+    dprintf(inst->conn_sock_fd, "%lX\r\n%s\r\n", chunk_size, chunk);
 
     return true;
 }
@@ -1167,29 +1178,25 @@ bool httpsrvdev_res_listing_entry(struct httpsrvdev_inst* inst,
     } else {
         anchor_target = "_self";
     }
-    inst->listing_res_content_len += sprintf(
-        inst->listing_res_content + inst->listing_res_content_len,
+    char chunk[512];
+    size_t chunk_size = sprintf(chunk,
         "<a style=\"color:#FFF;text-decoration:underline;"
                    "display:block;margin-bottom:0.5em\" "
             "href=\"%s\" "
             "target=\"%s\" "
         ">%s</a>",
         path, anchor_target, link_text);
+    dprintf(inst->conn_sock_fd, "%lX\r\n%s\r\n", chunk_size, chunk);
 
     return true;
 }
 
 bool httpsrvdev_res_listing_end(struct httpsrvdev_inst* inst) {
-    inst->listing_res_content_len += sprintf(
-        inst->listing_res_content + inst->listing_res_content_len,
+    char chunk[512];
+    size_t chunk_size = sprintf(chunk,
         "</body></html>");
-    inst->listing_res_content[inst->listing_res_content_len] = '\0';
-
-    if (!httpsrvdev_res_status_line(inst, 200) ||
-        !httpsrvdev_res_header     (inst, "Content-Type", "text/html; charset=utf-8") ||
-        !httpsrvdev_res_body       (inst, inst->listing_res_content)
-    )
-        return false;
+    dprintf(inst->conn_sock_fd, "%lX\r\n%s\r\n0\r\n", chunk_size, chunk);
+    httpsrvdev_res_end(inst);
 
     return true;
 }
