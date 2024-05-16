@@ -448,8 +448,535 @@ static bool path_with_root_to_path_rel_to_root(struct httpsrvdev_inst* inst,
     return true;
 }
 
+// TODO: Write a unit test to test that this and the next array match
+// MIME Type sources:
+//     https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types
+typedef struct file_type_info {
+    uint64_t ext_encoding;
+    char*    mime_type;
+    bool     charset_utf8;
+} FileTypeInfo;
+static FileTypeInfo file_type_infos[] = {
+    {
+        .ext_encoding = ('h'<<24) | ('t'<<16) | ('m'<< 8) | ('l'<< 0),
+        .mime_type    = "text/html",
+        .charset_utf8 = true
+    },
+    {
+        .ext_encoding = ('j'<< 8) | ('s'<< 0),
+        .mime_type    = "text/javascript",
+        .charset_utf8 = true
+    },
+    {
+        .ext_encoding = ('c'<<16) | ('s'<< 8) | ('s'<< 0),
+        .mime_type    = "text/css",
+        .charset_utf8 = true
+    },
+    {
+        .ext_encoding = ('m'<<16) | ('j'<< 8) | ('s'<< 0),
+        .mime_type    = "text/javascript",
+        .charset_utf8 = true
+    },
+    {
+        .ext_encoding = ('h'<<16) | ('t'<< 8) | ('m'<< 0),
+        .mime_type    = "text/html",
+        .charset_utf8 = true
+    },
+    {
+        .ext_encoding = (((uint64_t)'x')<<32) |
+            ('h'<<24) | ('t'<<16) | ('m'<< 8) | ('l'<< 0),
+        .mime_type    = "application/xhtml+xml",
+        .charset_utf8 = true
+    },
+
+    // Other common text formats ----------------------------------------
+    {
+        .ext_encoding = ('j'<<24) | ('s'<<16) | ('o'<< 8) | ('n'<< 0),
+        .mime_type    = "application/json",
+        .charset_utf8 = true
+    },
+    {
+        .ext_encoding = (((uint64_t) 'j')<<40) | (((uint64_t)'s')<<32) |
+            ('o'<<24) | ('n'<<16) | ('l'<< 8) | ('d'<< 0),
+        .mime_type    = "application/ld+json",
+        .charset_utf8 = true
+    },
+    {
+        .ext_encoding = ('t'<<16) | ('x'<< 8) | ('t'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('c'<<16) | ('s'<< 8) | ('v'<< 0),
+        .mime_type    = "text/csv",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('x'<<16) | ('m'<< 8) | ('l'<< 0),
+        .mime_type    = "application/xml",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('i'<<16) | ('c'<< 8) | ('s'<< 0),
+        .mime_type    = "text/calendar",
+        .charset_utf8 = true,
+    },
+
+    // Binary -----------------------------------------------------------
+    {
+        .ext_encoding = ('b'<<16) | ('i'<< 8) | ('n'<< 0),
+        .mime_type    = "application/octet-stream",
+        .charset_utf8 = true,
+    },
+
+    // Images -----------------------------------------------------------
+    {
+        .ext_encoding = ('j'<<16) | ('p'<< 8) | ('g'<< 0),
+        .mime_type    = "image/jpeg",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('j'<<24) | ('p'<<16) | ('e'<< 8) | ('g'<< 0),
+        .mime_type    = "image/jpeg",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('p'<<16) | ('n'<< 8) | ('g'<< 0),
+        .mime_type    = "image/png",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('w'<<24) | ('e'<<16) | ('b'<< 8) | ('p'<< 0),
+        .mime_type    = "image/webp",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('s'<<16) | ('v'<< 8) | ('g'<< 0),
+        .mime_type    = "image/svg+xml",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('g'<<16) | ('i'<< 8) | ('f'<< 0),
+        .mime_type    = "image/gif",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('t'<<16) | ('i'<< 8) | ('f'<< 0),
+        .mime_type    = "image/tiff",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('t'<<24) | ('i'<<16) | ('f'<< 8) | ('f'<< 0),
+        .mime_type    = "image/tiff",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('b'<<16) | ('m'<< 8) | ('p'<< 0),
+        .mime_type    = "image/bmp",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('a'<<24) | ('p'<<16) | ('n'<< 8) | ('g'<< 0),
+        .mime_type    = "image/apng",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('i'<<16) | ('c'<< 8) | ('o'<< 0),
+        .mime_type    = "image/vnd.microsoft.icon",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('a'<<24) | ('v'<<16) | ('i'<< 8) | ('f'<< 0),
+        .mime_type    = "image/avif",
+        .charset_utf8 = false,
+    },
+
+    // Fonts ------------------------------------------------------------
+    {
+        .ext_encoding = ('o'<<16) | ('f'<< 8) | ('t'<< 0),
+        .mime_type    = "font/oft",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('t'<<16) | ('t'<< 8) | ('f'<< 0),
+        .mime_type    = "font/ttf",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('w'<<24) | ('o'<<16) | ('f'<< 8) | ('f'<< 0),
+        .mime_type    = "font/woff",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = (((uint64_t) 'w')<<32) |
+            ('o'<<24) | ('f'<<16) | ('f'<< 8) | ('2'<< 0),
+        .mime_type    = "font/woff2",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('e'<<16) | ('o'<< 8) | ('t'<< 0),
+        .mime_type    = "application/vnd.ms-fontobject",
+        .charset_utf8 = false,
+    },
+
+    // Video ------------------------------------------------------------
+    {
+        .ext_encoding = ('m'<<16) | ('p'<< 8) | ('4'<< 0),
+        .mime_type    = "video/mp4",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('m'<<24) | ('p'<<16) | ('e'<< 8) | ('g'<< 0),
+        .mime_type    = "video/mpeg",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('a'<<16) | ('v'<< 8) | ('i'<< 0),
+        .mime_type    = "video/x-msvideo",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('w'<<24) | ('e'<<16) | ('b'<< 8) | ('m'<< 0),
+        .mime_type    = "video/webm",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('o'<<16) | ('g'<< 8) | ('v'<< 0),
+        .mime_type    = "video/ogg",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('o'<<16) | ('g'<< 8) | ('v'<< 0),
+        .mime_type    = "video/mp2t",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('t'<< 8) | ('s'<< 0),
+        .mime_type    = "video/mp2t",
+        .charset_utf8 = false,
+    },
+
+    // Audio ------------------------------------------------------------
+    {
+        .ext_encoding = ('m'<<16) | ('p'<< 8) | ('3'<< 0),
+        .mime_type    = "audio/mpeg",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('w'<<16) | ('a'<< 8) | ('v'<< 0),
+        .mime_type    = "audio/wav",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('o'<<24) | ('p'<<16) | ('u'<< 8) | ('s'<< 0),
+        .mime_type    = "audio/opus",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('o'<<16) | ('g'<< 8) | ('a'<< 0),
+        .mime_type    = "audio/ogg",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('a'<<16) | ('a'<< 8) | ('c'<< 0),
+        .mime_type    = "audio/aac",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('w'<<24) | ('e'<<16) | ('b'<< 8) | ('a'<< 0),
+        .mime_type    = "audio/weba",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('m'<<16) | ('i'<< 8) | ('d'<< 0),
+        .mime_type    = "audio/midi",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('m'<<24) | ('i'<<16) | ('d'<< 8) | ('i'<< 0),
+        .mime_type    = "audio/midi",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('c'<<16) | ('d'<< 8) | ('a'<< 0),
+        .mime_type    = "application/x-cdf",
+        .charset_utf8 = false,
+    },
+
+    // Document / Book formats ------------------------------------------
+    {
+        .ext_encoding = ('p'<<16) | ('d'<< 8) | ('f'<< 0),
+        .mime_type    = "application/pdf",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('d'<<24) | ('o'<<16) | ('c'<< 8) | ('x'<< 0),
+        .mime_type    = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('d'<<16) | ('o'<< 8) | ('c'<< 0),
+        .mime_type    = "application/msword",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('x'<<24) | ('l'<<16) | ('s'<< 8) | ('x'<< 0),
+        .mime_type    = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('x'<<16) | ('l'<< 8) | ('s'<< 0),
+        .mime_type    = "application/vnd.ms-excel",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('p'<<24) | ('p'<<16) | ('t'<< 8) | ('x'<< 0),
+        .mime_type    = "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('p'<<16) | ('p'<< 8) | ('t'<< 0),
+        .mime_type    = "application/vnd.ms-powerpoint",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('o'<<16) | ('d'<< 8) | ('t'<< 0),
+        .mime_type    = "application/vnd.oasis.opendocument.text",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('o'<<16) | ('d'<< 8) | ('p'<< 0),
+        .mime_type    = "application/vnd.oasis.opendocument.presentation",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('o'<<16) | ('d'<< 8) | ('s'<< 0),
+        .mime_type    = "application/vnd.oasis.opendocument.spreadsheet",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('e'<<24) | ('p'<<16) | ('u'<< 8) | ('b'<< 0),
+        .mime_type    = "application/epub+zip",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('a'<<16) | ('z'<< 8) | ('w'<< 0),
+        .mime_type    = "application/vnd.amazon.ebook",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('a'<<16) | ('b'<< 8) | ('w'<< 0),
+        .mime_type    = "application/x-abiword",
+        .charset_utf8 = false,
+    },
+
+    // Archive / compression formats ------------------------------------
+    {
+        .ext_encoding = ('z'<<16) | ('i'<< 8) | ('p'<< 0),
+        .mime_type    = "application/zip",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('g'<< 8) | ('z'<< 0),
+        .mime_type    = "application/gzip",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('t'<<16) | ('a'<< 8) | ('r'<< 0),
+        .mime_type    = "application/x-tar",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('7'<< 8) | ('z'<< 0),
+        .mime_type    = "application/x-7z-compressed",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('b'<< 8) | ('z'<< 0),
+        .mime_type    = "application/x-bzip",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('b'<<16) | ('z'<< 8) | ('2'<< 0),
+        .mime_type    = "application/x-bzip2",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('a'<<16) | ('r'<< 8) | ('c'<< 0),
+        .mime_type    = "application/x-freearc",
+        .charset_utf8 = false,
+    },
+
+    // Programmer BS ----------------------------------------------------
+    {
+        .ext_encoding = ('j'<<16) | ('a'<< 8) | ('r'<< 0),
+        .mime_type    = "application/java-archive",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('p'<<16) | ('h'<< 8) | ('p'<< 0),
+        .mime_type    = "application/x-httpd-php",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('s'<< 8) | ('h'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('r'<<16) | ('t'<< 8) | ('f'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('c'<<16) | ('s'<< 8) | ('h'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('m'<< 8) | ('d'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('o'<<16) | ('r'<< 8) | ('g'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('a'<<16) | ('d'<<16) | ('o'<< 8) | ('c'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('c'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('h'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('p'<< 8) | ('y'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('c'<<16) | ('p'<< 8) | ('p'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('c'<<16) | ('+'<< 8) | ('+'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('h'<<16) | ('p'<< 8) | ('p'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('h'<<16) | ('+'<< 8) | ('+'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('g'<< 8) | ('o'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('j'<<16) | ('a'<<16) | ('v'<< 8) | ('a'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('z'<<16) | ('i'<< 8) | ('g'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('o'<<16) | ('d'<<16) | ('i'<< 8) | ('n'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('h'<< 8) | ('a'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('j'<<16) | ('a'<< 8) | ('i'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('c'<<16) | ('j'<< 8) | ('s'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('m'<<16) | ('o'<<16) | ('j'<< 8) | ('o'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+    {
+        .ext_encoding = ('r'<< 8) | ('b'<< 0),
+        .mime_type    = "text/plain",
+        .charset_utf8 = true,
+    },
+
+    // Misc -------------------------------------------------------------
+    {
+        .ext_encoding = ('o'<<16) | ('g'<< 8) | ('x'<< 0),
+        .mime_type    = "application/ogg",
+        .charset_utf8 = false,
+    },
+    {
+        .ext_encoding = ('v'<<16) | ('s'<< 8) | ('d'<< 0),
+        .mime_type    = "application/vnd.visio",
+        .charset_utf8 = false,
+    },
+};
+
+
+static FileTypeInfo default_faile_type_info = {
+    .ext_encoding = 0,
+    .mime_type    = "",
+    .charset_utf8 = true,
+};
+
+static FileTypeInfo* get_file_type_info_(struct httpsrvdev_inst* inst, char* file_path) {
+    uint64_t ext_encoding = httpsrvdev_file_encode_ext(inst, file_path);
+    if (ext_encoding == 0) {
+        if (inst->default_file_mime_type[0] == '\0') {
+            inst->err = httpsrvdev_FILE_HAS_NO_EXT;
+        }
+        default_faile_type_info.ext_encoding = ext_encoding;
+        default_faile_type_info.mime_type    = inst->default_file_mime_type;
+        default_faile_type_info.charset_utf8 = true;
+        return &default_faile_type_info;
+    }
+
+    // TODO: Do something faster than a linear search
+    for (size_t i = 0; i < sizeof(file_type_infos)/sizeof(file_type_infos[0]); ++i) {
+        if (file_type_infos[i].ext_encoding == ext_encoding) {
+            return &file_type_infos[i];
+        }
+    }
+
+    inst->err = httpsrvdev_LIB_IMPL_ERR;
+    default_faile_type_info.ext_encoding = ext_encoding;
+    default_faile_type_info.mime_type    = inst->default_file_mime_type;
+    default_faile_type_info.charset_utf8 = true;
+    return &default_faile_type_info;
+}
+
 bool httpsrvdev_res_file(struct httpsrvdev_inst* inst, char* path) {
-    char* mime_type = httpsrvdev_file_mime_type(inst, path);
+    FileTypeInfo* file_type_info = get_file_type_info_(inst, path);
 
     int fd = open(path, O_RDONLY);
     if (fd == -1) {
@@ -480,11 +1007,25 @@ bool httpsrvdev_res_file(struct httpsrvdev_inst* inst, char* path) {
     char content_length_value_buf[20];
     sprintf(content_length_value_buf, "%d", content_length);
     if (!httpsrvdev_res_status_line(inst, 200) ||
-        !httpsrvdev_res_headerf(inst,
-            "Content-Type"  , "%s; charset=utf-8", mime_type) ||
-        !httpsrvdev_res_header(inst, "Content-Length", content_length_value_buf) ||
-        !httpsrvdev_res_header(inst, "Connection"    , "Keep-Alive")
+        !httpsrvdev_res_header(inst, "Content-Length", content_length_value_buf)
     ) {
+        close(fd);
+        return false;
+    }
+    if (file_type_info->charset_utf8) {
+        if(!httpsrvdev_res_headerf(inst,
+            "Content-Type", "%s; charset=utf-8", file_type_info->mime_type)
+        ) {
+            close(fd);
+            return false;
+        }
+    } else {
+        if(!httpsrvdev_res_header(inst, "Content-Type", file_type_info->mime_type)) {
+            close(fd);
+            return false;
+        }
+    }
+    if (!httpsrvdev_res_header (inst, "Connection", "Keep-Alive")) {
         close(fd);
         return false;
     }
@@ -673,271 +1214,6 @@ bool httpsrvdev_res_listing_end(struct httpsrvdev_inst* inst) {
     return true;
 }
 
-// TODO: Write a unit test to test that this and the next array match
-// MIME Type sources:
-//     https://developer.mozilla.org/en-US/docs/Web/HTTP/Basics_of_HTTP/MIME_types/Common_types
-static uint64_t ext_encodings[] = {
-    // Web Stuff --------------------------------------------------------
-                            ('h'<<24) | ('t'<<16) | ('m'<< 8) | ('l'<< 0),
-                                                    ('j'<< 8) | ('s'<< 0),
-                                        ('c'<<16) | ('s'<< 8) | ('s'<< 0),
-                                        ('m'<<16) | ('j'<< 8) | ('s'<< 0),
-                                        ('h'<<16) | ('t'<< 8) | ('m'<< 0),
-                ('x'<<24) | ('h'<<24) | ('t'<<16) | ('m'<< 8) | ('l'<< 0),
-
-    // Other common text formats ----------------------------------------
-                            ('j'<<24) | ('s'<<16) | ('o'<< 8) | ('n'<< 0),
-    (((uint64_t) 'j')<<40) | (((uint64_t)'s')<<32)|
-                            ('o'<<24) | ('n'<<16) | ('l'<< 8) | ('d'<< 0),
-                                        ('t'<<16) | ('x'<< 8) | ('t'<< 0),
-                                        ('c'<<16) | ('s'<< 8) | ('v'<< 0),
-                                        ('x'<<16) | ('m'<< 8) | ('l'<< 0),
-                                        ('i'<<16) | ('c'<< 8) | ('s'<< 0),
-
-    // Binary -----------------------------------------------------------
-                                        ('b'<<16) | ('i'<< 8) | ('n'<< 0),
-
-    // Images -----------------------------------------------------------
-                                        ('j'<<16) | ('p'<< 8) | ('g'<< 0),
-                            ('j'<<24) | ('p'<<16) | ('e'<< 8) | ('g'<< 0),
-                                        ('p'<<16) | ('n'<< 8) | ('g'<< 0),
-                            ('w'<<24) | ('e'<<16) | ('b'<< 8) | ('p'<< 0),
-                                        ('s'<<16) | ('v'<< 8) | ('g'<< 0),
-                                        ('g'<<16) | ('i'<< 8) | ('f'<< 0),
-                                        ('t'<<16) | ('i'<< 8) | ('f'<< 0),
-                            ('t'<<24) | ('i'<<16) | ('f'<< 8) | ('f'<< 0),
-                                        ('b'<<16) | ('m'<< 8) | ('p'<< 0),
-                            ('a'<<24) | ('p'<<16) | ('n'<< 8) | ('g'<< 0),
-                                        ('i'<<16) | ('c'<< 8) | ('o'<< 0),
-                            ('a'<<24) | ('v'<<16) | ('i'<< 8) | ('f'<< 0),
-
-    // Fonts ------------------------------------------------------------
-                                        ('o'<<16) | ('f'<< 8) | ('t'<< 0),
-                                        ('t'<<16) | ('t'<< 8) | ('f'<< 0),
-                            ('w'<<24) | ('o'<<16) | ('f'<< 8) | ('f'<< 0),
-                ('w'<<24) | ('o'<<24) | ('f'<<16) | ('f'<< 8) | ('2'<< 0),
-                                        ('e'<<16) | ('o'<< 8) | ('t'<< 0),
-
-    // Video ------------------------------------------------------------
-                                        ('m'<<16) | ('p'<< 8) | ('4'<< 0),
-                            ('m'<<24) | ('p'<<16) | ('e'<< 8) | ('g'<< 0),
-                                        ('a'<<16) | ('v'<< 8) | ('i'<< 0),
-                            ('w'<<24) | ('e'<<16) | ('b'<< 8) | ('m'<< 0),
-                                        ('o'<<16) | ('g'<< 8) | ('v'<< 0),
-                                                    ('t'<< 8) | ('s'<< 0),
-
-    // Audio ------------------------------------------------------------
-                                        ('m'<<16) | ('p'<< 8) | ('3'<< 0),
-                                        ('w'<<16) | ('a'<< 8) | ('v'<< 0),
-                            ('o'<<24) | ('p'<<16) | ('u'<< 8) | ('s'<< 0),
-                                        ('o'<<16) | ('g'<< 8) | ('a'<< 0),
-                                        ('a'<<16) | ('a'<< 8) | ('c'<< 0),
-                            ('w'<<24) | ('e'<<16) | ('b'<< 8) | ('a'<< 0),
-                                        ('m'<<16) | ('i'<< 8) | ('d'<< 0),
-                            ('m'<<24) | ('i'<<16) | ('d'<< 8) | ('i'<< 0),
-                                        ('c'<<16) | ('d'<< 8) | ('a'<< 0),
-
-    // Document / Book formats ------------------------------------------
-                                        ('p'<<16) | ('d'<< 8) | ('f'<< 0),
-                            ('d'<<24) | ('o'<<16) | ('c'<< 8) | ('x'<< 0),
-                                        ('d'<<16) | ('o'<< 8) | ('c'<< 0),
-                            ('x'<<24) | ('l'<<16) | ('s'<< 8) | ('x'<< 0),
-                                        ('x'<<16) | ('l'<< 8) | ('s'<< 0),
-                            ('p'<<24) | ('p'<<16) | ('t'<< 8) | ('x'<< 0),
-                                        ('p'<<16) | ('p'<< 8) | ('t'<< 0),
-                                        ('o'<<16) | ('d'<< 8) | ('t'<< 0),
-                                        ('o'<<16) | ('d'<< 8) | ('p'<< 0),
-                                        ('o'<<16) | ('d'<< 8) | ('s'<< 0),
-                            ('e'<<24) | ('p'<<16) | ('u'<< 8) | ('b'<< 0),
-                                        ('a'<<16) | ('z'<< 8) | ('w'<< 0),
-                                        ('a'<<16) | ('b'<< 8) | ('w'<< 0),
-
-    // Archive / compression formats ------------------------------------
-                                        ('z'<<16) | ('i'<< 8) | ('p'<< 0),
-                                                    ('g'<< 8) | ('z'<< 0),
-                                        ('t'<<16) | ('a'<< 8) | ('r'<< 0),
-                                                    ('7'<< 8) | ('z'<< 0),
-                                                    ('b'<< 8) | ('z'<< 0),
-                                        ('b'<<16) | ('z'<< 8) | ('2'<< 0),
-                                        ('a'<<16) | ('r'<< 8) | ('c'<< 0),
-
-    // Programmer BS ----------------------------------------------------
-                                        ('j'<<16) | ('a'<< 8) | ('r'<< 0),
-                                        ('p'<<16) | ('h'<< 8) | ('p'<< 0),
-                                                    ('s'<< 8) | ('h'<< 0),
-                                        ('r'<<16) | ('t'<< 8) | ('f'<< 0),
-                                        ('c'<<16) | ('s'<< 8) | ('h'<< 0),
-
-    // Other programmer extensions are treated as text.
-    // TODO: Make this togglable because this is useful but also unexpected
-    //       behaviour
-                            // Markdown
-                                                    ('m'<< 8) | ('d'<< 0),
-                            // Org mode
-                                        ('o'<<16) | ('r'<< 8) | ('g'<< 0),
-                            // Ascii Doc
-                            ('a'<<16) | ('d'<<16) | ('o'<< 8) | ('c'<< 0),
-                            // C
-                                                                ('c'<< 0),
-                                                                ('h'<< 0),
-                            // Python
-                                                    ('p'<< 8) | ('y'<< 0),
-                            // C++
-                                        ('c'<<16) | ('p'<< 8) | ('p'<< 0),
-                                        ('c'<<16) | ('+'<< 8) | ('+'<< 0),
-                                        ('h'<<16) | ('p'<< 8) | ('p'<< 0),
-                                        ('h'<<16) | ('+'<< 8) | ('+'<< 0),
-                            // Go
-                                                    ('g'<< 8) | ('o'<< 0),
-                            // Java
-                            ('j'<<16) | ('a'<<16) | ('v'<< 8) | ('a'<< 0),
-                            // Zig
-                                        ('z'<<16) | ('i'<< 8) | ('g'<< 0),
-                            // Odin
-                            ('o'<<16) | ('d'<<16) | ('i'<< 8) | ('n'<< 0),
-                            // Odin
-                                                    ('h'<< 8) | ('a'<< 0),
-                            // Jai
-                                        ('j'<<16) | ('a'<< 8) | ('i'<< 0),
-                            // JavaScript -- Node's CommonJS
-                                        ('c'<<16) | ('j'<< 8) | ('s'<< 0),
-                            // Mojo
-                            ('m'<<16) | ('o'<<16) | ('j'<< 8) | ('o'<< 0),
-                                // NOTE: We're not going to support
-                                //       emoji extensions unless they
-                                //       become common... It's just
-                                //       cringe marketing that makes
-                                //       building software harder
-                            // Ruby
-                                                    ('r'<< 8) | ('b'<< 0),
-                            // This list is non-exhaustive -- just stuff
-                            // that I might use. Feel free to extend /
-                            // submit an issue/PR as needed
-
-    // Misc -------------------------------------------------------------
-                                        ('o'<<16) | ('g'<< 8) | ('x'<< 0),
-                                        ('v'<<16) | ('s'<< 8) | ('d'<< 0),
-};
-static char* mime_types[] = {
-    // Web Stuff
-    "text/html",
-    "text/javascript",
-    "text/css",
-    "text/javascript",
-    "text/html",
-    "application/xhtml+xml",
-
-    // Other common text formats
-    "application/json",
-    "application/ld+json",
-    "text/plain",
-    "text/csv",
-    "application/xml",
-    "text/calendar",
-
-    // Binary
-    "application/octet-stream",
-
-    // Images
-    "image/jpeg",
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "image/svg+xml",
-    "image/gif",
-    "image/tiff",
-    "image/tiff",
-    "image/bmp",
-    "image/apng",
-    "image/vnd.microsoft.icon",
-    "image/avif",
-
-    // Fonts
-    "font/oft",
-    "font/ttf",
-    "font/woff",
-    "font/woff2",
-    "application/vnd.ms-fontobject",
-
-    // Audio
-    "audio/mpeg",
-    "audio/wav",
-    "audio/opus",
-    "audio/ogg",
-    "audio/aac",
-    "audio/weba",
-    "audio/midi",
-    "audio/midi",
-    "application/x-cdf",
-
-    // Video
-    "video/mp4",
-    "video/mpeg",
-    "video/x-msvideo",
-    "video/webm",
-    "video/ogg",
-    "video/mp2t",
-
-    // Document / Book formats
-    "application/pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        // ^^ Somebody's getting paid by the character
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "application/vnd.ms-powerpoint",
-    "application/vnd.oasis.opendocument.text",
-    "application/vnd.oasis.opendocument.presentation",
-    "application/vnd.oasis.opendocument.spreadsheet",
-    "application/epub+zip",
-    "application/vnd.amazon.ebook",
-    "application/x-abiword",
-
-    // Archive / compression formats
-    "application/zip",
-    "application/gzip",
-    "application/x-tar",
-    "application/x-7z-compressed",
-    "application/x-bzip",
-    "application/x-bzip2",
-    "application/x-freearc",
-
-    // Programmer BS
-    "application/java-archive",
-    "application/x-httpd-php",
-    "application/x-sh",
-    "application/rtf",
-    "application/x-csh",
-
-    // Other programmer extensions are treated as text.
-    // TODO: Make this togglable because this is useful but also unexpected
-    //       behaviour
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-    "text/plain",
-
-    // Misc
-    "application/ogg",
-    "application/vnd.visio",
-};
-
 uint64_t httpsrvdev_file_encode_ext(struct httpsrvdev_inst* inst, char* file_path) {
     uint64_t encoding = 0;
     size_t path_len = strlen(file_path);
@@ -949,30 +1225,10 @@ uint64_t httpsrvdev_file_encode_ext(struct httpsrvdev_inst* inst, char* file_pat
         if (c == '.') {
             return encoding;
         }
-        encoding |= c << (i * 8);
+        encoding |= ((uint64_t) c) << (i * 8);
     }
 
     return 0;
-}
-
-char* httpsrvdev_file_mime_type(struct httpsrvdev_inst* inst, char* file_path) {
-    uint64_t ext_encoding = httpsrvdev_file_encode_ext(inst, file_path);
-    if (ext_encoding == 0) {
-        if (inst->default_file_mime_type[0] == '\0') {
-            inst->err = httpsrvdev_FILE_HAS_NO_EXT;
-        }
-        return inst->default_file_mime_type;
-    }
-
-    // TODO: Do something faster than a linear search
-    for (size_t i = 0; i < sizeof(ext_encodings)/sizeof(ext_encodings[0]); ++i) {
-        if (ext_encodings[i] == ext_encoding) {
-            return mime_types[i];
-        }
-    }
-
-    inst->err = httpsrvdev_LIB_IMPL_ERR;
-    return inst->default_file_mime_type;
 }
 
 bool httpsrvdev_ipv4_from_str(struct httpsrvdev_inst* inst, char* str) {
