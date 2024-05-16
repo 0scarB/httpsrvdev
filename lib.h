@@ -55,10 +55,6 @@ struct httpsrvdev_inst {
     int      req_headers_count;
     uint16_t req_body_slice           [2];
 
-    // Response stuff
-    char   res_chunk_buf[2048];
-    size_t res_chunk_len;
-
     char* default_file_mime_type;
 
     char   listing_res_content[32*1024];

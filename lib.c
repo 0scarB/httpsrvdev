@@ -56,8 +56,6 @@ struct httpsrvdev_inst httpsrvdev_init_begin() {
         .listen_sock_fd = -1,
         .  conn_sock_fd = -1,
 
-        .res_chunk_len = 0,
-
         .default_file_mime_type = "\0",
 
         .root_path = ".",
@@ -313,21 +311,12 @@ bool httpsrvdev_res_begin(struct httpsrvdev_inst* inst) {
 }
 
 bool httpsrvdev_res_send_n(struct httpsrvdev_inst* inst, char* str, size_t n) {
-    // Naive buffered I/O
-    if (n + inst->res_chunk_len <= 2048) {
-        strncpy(inst->res_chunk_buf + inst->res_chunk_len, str, n);
-        inst->res_chunk_len += n;
-        return true;
-    } else {
-        int copy_n_bytes = 2048 - inst->res_chunk_len;
-        strncpy(inst->res_chunk_buf + inst->res_chunk_len, str, copy_n_bytes);
-        write(inst->conn_sock_fd, inst->res_chunk_buf, 2048);
-        inst->res_chunk_len = 0;
-
-        if (!httpsrvdev_res_send_n(inst, str + copy_n_bytes, n - copy_n_bytes))
-            return false;
+    if (write(inst->conn_sock_fd, str, n) == -1) {
+        // TODO: inst->err = ...
+        return false;
     }
-
+    // NOTE: We don't need to do our own buffering becuase TCP sockets are
+    //       buffered by default -- see `man 7 tcp`
     return true;
 }
 
@@ -336,17 +325,7 @@ bool httpsrvdev_res_send(struct httpsrvdev_inst* inst, char* str) {
 }
 
 bool httpsrvdev_res_end(struct httpsrvdev_inst* inst) {
-    if (inst->res_chunk_buf[inst->res_chunk_len - 2] != '\r' ||
-        inst->res_chunk_buf[inst->res_chunk_len - 1] != '\n'
-    ) {
-        httpsrvdev_res_send_n(inst, "\r\n", 2);
-    }
-
-    if (inst->res_chunk_len > 0) {
-        inst->res_chunk_buf[inst->res_chunk_len] = '\0';
-        write(inst->conn_sock_fd, inst->res_chunk_buf, inst->res_chunk_len);
-        inst->res_chunk_len = 0;
-    }
+    if (!httpsrvdev_res_send_n(inst, "\r\n", 2)) return false;
 
     if (inst->conn_sock_fd != -1) {
         // Shutdown seems to be required before close for large files
@@ -391,9 +370,7 @@ bool httpsrvdev_res_body(struct httpsrvdev_inst* inst, char* body) {
         return false;
     if (!httpsrvdev_res_send(inst, "\r\n")) return false;
     if (!httpsrvdev_res_send(inst, body  )) return false;
-    if (!httpsrvdev_res_send(inst, "\r\n")) return false;
-
-    if (!httpsrvdev_res_end(inst)) return false;
+    if (!httpsrvdev_res_end (inst        )) return false;
 
     return true;
 }
@@ -460,46 +437,46 @@ static FileTypeInfo file_type_infos[] = {
     {
         .ext_encoding = ('h'<<24) | ('t'<<16) | ('m'<< 8) | ('l'<< 0),
         .mime_type    = "text/html",
-        .charset_utf8 = true
+        .charset_utf8 = true,
     },
     {
         .ext_encoding = ('j'<< 8) | ('s'<< 0),
         .mime_type    = "text/javascript",
-        .charset_utf8 = true
+        .charset_utf8 = true,
     },
     {
         .ext_encoding = ('c'<<16) | ('s'<< 8) | ('s'<< 0),
         .mime_type    = "text/css",
-        .charset_utf8 = true
+        .charset_utf8 = true,
     },
     {
         .ext_encoding = ('m'<<16) | ('j'<< 8) | ('s'<< 0),
         .mime_type    = "text/javascript",
-        .charset_utf8 = true
+        .charset_utf8 = true,
     },
     {
         .ext_encoding = ('h'<<16) | ('t'<< 8) | ('m'<< 0),
         .mime_type    = "text/html",
-        .charset_utf8 = true
+        .charset_utf8 = true,
     },
     {
         .ext_encoding = (((uint64_t)'x')<<32) |
             ('h'<<24) | ('t'<<16) | ('m'<< 8) | ('l'<< 0),
         .mime_type    = "application/xhtml+xml",
-        .charset_utf8 = true
+        .charset_utf8 = true,
     },
 
     // Other common text formats ----------------------------------------
     {
         .ext_encoding = ('j'<<24) | ('s'<<16) | ('o'<< 8) | ('n'<< 0),
         .mime_type    = "application/json",
-        .charset_utf8 = true
+        .charset_utf8 = true,
     },
     {
         .ext_encoding = (((uint64_t) 'j')<<40) | (((uint64_t)'s')<<32) |
             ('o'<<24) | ('n'<<16) | ('l'<< 8) | ('d'<< 0),
         .mime_type    = "application/ld+json",
-        .charset_utf8 = true
+        .charset_utf8 = true,
     },
     {
         .ext_encoding = ('t'<<16) | ('x'<< 8) | ('t'<< 0),
@@ -522,7 +499,7 @@ static FileTypeInfo file_type_infos[] = {
         .charset_utf8 = true,
     },
 
-    // Binary -----------------------------------------------------------
+    // Unspecified Binary -----------------------------------------------
     {
         .ext_encoding = ('b'<<16) | ('i'<< 8) | ('n'<< 0),
         .mime_type    = "application/octet-stream",
@@ -711,7 +688,8 @@ static FileTypeInfo file_type_infos[] = {
     },
     {
         .ext_encoding = ('d'<<24) | ('o'<<16) | ('c'<< 8) | ('x'<< 0),
-        .mime_type    = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        .mime_type    =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         .charset_utf8 = false,
     },
     {
@@ -721,7 +699,8 @@ static FileTypeInfo file_type_infos[] = {
     },
     {
         .ext_encoding = ('x'<<24) | ('l'<<16) | ('s'<< 8) | ('x'<< 0),
-        .mime_type    = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        .mime_type    =
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         .charset_utf8 = false,
     },
     {
@@ -731,7 +710,8 @@ static FileTypeInfo file_type_infos[] = {
     },
     {
         .ext_encoding = ('p'<<24) | ('p'<<16) | ('t'<< 8) | ('x'<< 0),
-        .mime_type    = "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        .mime_type    =
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         .charset_utf8 = false,
     },
     {
