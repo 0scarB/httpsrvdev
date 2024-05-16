@@ -14,20 +14,20 @@
 //     HTTP Semantics   : https://datatracker.ietf.org/doc/html/rfc9110
 //     HTTP/1.1 RFC 9112: https://datatracker.ietf.org/doc/html/rfc9112
 
-#define SPRINTF_TO_STR_FROM_FMT_AND_VARGS(str_buf_size) \
+#define SPRINTF_TO_STR_FROM_FMT_AND_VARGS \
     va_list sprintf_args; \
     va_start(sprintf_args, fmt); \
-    char str[str_buf_size]; \
-    vsprintf(str, fmt, sprintf_args); \
+    vsprintf(str_buf, fmt, sprintf_args); \
     va_end(sprintf_args)
 
 #ifdef DEV
     // Utilities for use during development
 
     void printf_with_escapes(char* fmt, ...) {
-        SPRINTF_TO_STR_FROM_FMT_AND_VARGS(16*1024);
-        for (size_t i = 0; i < strlen(str); ++i) {
-            char c = str[i];
+        char str_buf[16*1024];
+        SPRINTF_TO_STR_FROM_FMT_AND_VARGS;
+        for (size_t i = 0; i < strlen(str_buf); ++i) {
+            char c = str_buf[i];
             switch (c) {
                 case '\n':
                     putchar('\\'); putchar('n'); putchar('\n');
@@ -59,9 +59,29 @@ struct httpsrvdev_inst httpsrvdev_init_begin() {
         .default_file_mime_type = "\0",
 
         .root_path = ".",
+
+        // TODO: Memory allignment
+        .same_scope_tmp_mem_alloc_offset = 0,
     };
+    inst.same_scope_tmp_mem_size = sizeof(inst.same_scope_tmp_mem);
 
     return inst;
+}
+
+static void* same_scope_tmp_alloc(struct httpsrvdev_inst* inst, size_t size) {
+    size_t alloc_end_offset = inst->same_scope_tmp_mem_alloc_offset + size;
+    void* ptr;
+    // Increment if end of allocation is withing memory region size;
+    if (alloc_end_offset < inst->same_scope_tmp_mem_size) {
+        ptr = inst->same_scope_tmp_mem + inst->same_scope_tmp_mem_alloc_offset;
+        inst->same_scope_tmp_mem_alloc_offset = alloc_end_offset;
+    // otherwise reset/wrap to start of region.
+    } else {
+        ptr = inst->same_scope_tmp_mem;
+        inst->same_scope_tmp_mem_alloc_offset = size;
+    }
+
+    return ptr;
 }
 
 bool httpsrvdev_init_end(struct httpsrvdev_inst* inst) {
@@ -341,7 +361,7 @@ bool httpsrvdev_res_end(struct httpsrvdev_inst* inst) {
 
 bool httpsrvdev_res_status_line(struct httpsrvdev_inst* inst, int status) {
     if (!httpsrvdev_res_send(inst, "HTTP/1.1 ")) return false;
-    char status_buf[4];
+    char* status_buf = same_scope_tmp_alloc(inst, 8);
     sprintf(status_buf, "%d", status);
     if (!httpsrvdev_res_send(inst, status_buf))  return false;
     if (!httpsrvdev_res_send(inst, "\r\n"))      return false;
@@ -359,13 +379,12 @@ bool httpsrvdev_res_header(struct httpsrvdev_inst* inst, char* name, char* value
 }
 
 bool httpsrvdev_res_headerf(struct httpsrvdev_inst* inst, char* name, char* fmt, ...) {
-    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
-    return httpsrvdev_res_header(inst, name, str);
+    char* str_buf = same_scope_tmp_alloc(inst, 1024);
+    return httpsrvdev_res_header(inst, name, str_buf);
 }
 
 bool httpsrvdev_res_body(struct httpsrvdev_inst* inst, char* body) {
-    char content_len_value_buf[20];
-    sprintf(content_len_value_buf, "%ld", strlen(body));
+    char* content_len_value_buf = same_scope_tmp_alloc(inst, 24);
     if (!httpsrvdev_res_header(inst, "Content-Length", content_len_value_buf))
         return false;
     if (!httpsrvdev_res_send(inst, "\r\n")) return false;
@@ -384,7 +403,7 @@ static bool path_rel_to_root_to_path_with_root(struct httpsrvdev_inst* inst,
     }
 
     // Join root and path
-    char full_path[strlen(path) + strlen(inst->root_path) + 2];
+    char* full_path = same_scope_tmp_alloc(inst, 1024);
     char* path_end_ptr = stpcpy(full_path, inst->root_path);
     *(path_end_ptr++) = '/';
     path_end_ptr = stpcpy(path_end_ptr, path);
@@ -402,7 +421,7 @@ static bool path_rel_to_root_to_path_with_root(struct httpsrvdev_inst* inst,
 static bool path_with_root_to_path_rel_to_root(struct httpsrvdev_inst* inst,
     char* path, char* result_path
 ) {
-    char path_resolved[1024];
+    char* path_resolved = same_scope_tmp_alloc(inst, 1024);
     path_resolved[0] = '\0';
     realpath(path, path_resolved);
 
@@ -411,7 +430,7 @@ static bool path_with_root_to_path_rel_to_root(struct httpsrvdev_inst* inst,
         return true;
     }
 
-    char root_path[1024];
+    char* root_path = same_scope_tmp_alloc(inst, 1024);
     realpath(inst->root_path, root_path);
 
     size_t root_path_len = strlen(root_path);
@@ -1043,7 +1062,7 @@ static char* index_files[] = {"/index.html", "index.htm"};
 
 bool httpsrvdev_res_dir(struct httpsrvdev_inst* inst, char* dir_path) {
     for (size_t i = 0; i < sizeof(index_files)/sizeof(index_files[0]); ++i) {
-        char index_file_path[512];
+        char* index_file_path = same_scope_tmp_alloc(inst, 1024);
         strcpy(stpcpy(index_file_path, dir_path), index_files[i]);
         struct stat index_file_path_stat;
 
@@ -1100,18 +1119,21 @@ bool httpsrvdev_res_file_sys_entry(struct httpsrvdev_inst* inst, char* path) {
 }
 
 bool httpsrvdev_res_filef(struct httpsrvdev_inst* inst, char* fmt, ...) {
-    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
-    return httpsrvdev_res_file(inst, str);
+    char str_buf[512];
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS;
+    return httpsrvdev_res_file(inst, str_buf);
 }
 
 bool httpsrvdev_res_dirf(struct httpsrvdev_inst* inst, char* fmt, ...) {
-    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
-    return httpsrvdev_res_dir(inst, str);
+    char str_buf[512];
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS;
+    return httpsrvdev_res_dir(inst, str_buf);
 }
 
 bool httpsrvdev_res_file_sys_entryf(struct httpsrvdev_inst* inst, char* fmt, ...) {
-    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
-    return httpsrvdev_res_file_sys_entry(inst, str);
+    char str_buf[512];
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS;
+    return httpsrvdev_res_file_sys_entry(inst, str_buf);
 }
 
 bool httpsrvdev_res_rel_file(struct httpsrvdev_inst* inst, char* path) {
@@ -1133,23 +1155,26 @@ bool httpsrvdev_res_rel_file_sys_entry(struct httpsrvdev_inst* inst, char* path)
 }
 
 bool httpsrvdev_res_rel_filef(struct httpsrvdev_inst* inst, char* fmt, ...) {
-    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
+    char str_buf[512];
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS;
     char resolved_path[512];
-    path_rel_to_root_to_path_with_root(inst, str, resolved_path);
+    path_rel_to_root_to_path_with_root(inst, str_buf, resolved_path);
     return httpsrvdev_res_file(inst, resolved_path);
 }
 
 bool httpsrvdev_res_rel_dirf(struct httpsrvdev_inst* inst, char* fmt, ...) {
-    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
+    char str_buf[512];
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS;
     char resolved_path[512];
-    path_rel_to_root_to_path_with_root(inst, str, resolved_path);
+    path_rel_to_root_to_path_with_root(inst, str_buf, resolved_path);
     return httpsrvdev_res_dir(inst, resolved_path);
 }
 
 bool httpsrvdev_res_rel_file_sys_entryf(struct httpsrvdev_inst* inst, char* fmt, ...) {
-    SPRINTF_TO_STR_FROM_FMT_AND_VARGS(512);
+    char str_buf[512];
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS;
     char resolved_path[512];
-    path_rel_to_root_to_path_with_root(inst, str, resolved_path);
+    path_rel_to_root_to_path_with_root(inst, str_buf, resolved_path);
     return httpsrvdev_res_file_sys_entry(inst, resolved_path);
 }
 
@@ -1158,7 +1183,7 @@ bool httpsrvdev_res_listing_begin(struct httpsrvdev_inst* inst) {
     httpsrvdev_res_header(inst, "Content-Type", "text/html");
     httpsrvdev_res_header(inst, "Transfer-Encoding", "chunked");
     httpsrvdev_res_send_n(inst, "\r\n", 2);
-    char chunk[512];
+    char* chunk = same_scope_tmp_alloc(inst, 256);
     size_t chunk_size = sprintf(chunk,
         "<!DOCTYPE html>\n"
         "<html><body style=\"font-family:sans-serif;\n"
@@ -1178,7 +1203,7 @@ bool httpsrvdev_res_listing_entry(struct httpsrvdev_inst* inst,
     } else {
         anchor_target = "_self";
     }
-    char chunk[512];
+    char* chunk = same_scope_tmp_alloc(inst, 256);
     size_t chunk_size = sprintf(chunk,
         "<a style=\"color:#FFF;text-decoration:underline;"
                    "display:block;margin-bottom:0.5em\" "
@@ -1192,7 +1217,7 @@ bool httpsrvdev_res_listing_entry(struct httpsrvdev_inst* inst,
 }
 
 bool httpsrvdev_res_listing_end(struct httpsrvdev_inst* inst) {
-    char chunk[512];
+    char* chunk = same_scope_tmp_alloc(inst, 256);
     size_t chunk_size = sprintf(chunk,
         "</body></html>");
     dprintf(inst->conn_sock_fd, "%lX\r\n%s\r\n0\r\n", chunk_size, chunk);

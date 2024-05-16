@@ -58,6 +58,11 @@ struct httpsrvdev_inst {
     char* default_file_mime_type;
 
     char root_path[512];
+
+    /* A region of memory reserved for small, short-lived allocations. */
+    char   same_scope_tmp_mem[8192];
+    size_t same_scope_tmp_mem_size;
+    size_t same_scope_tmp_mem_alloc_offset;
 };
 
 struct httpsrvdev_inst httpsrvdev_init_begin();
