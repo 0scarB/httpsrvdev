@@ -62,6 +62,8 @@ struct httpsrvdev_inst httpsrvdev_init_begin() {
         .req_headers_count = 0,
         .req_body = "",
 
+        .res_status = -1,
+
         .default_file_mime_type = "\0",
 
         .root_path = ".",
@@ -138,6 +140,7 @@ static bool parse_req(struct httpsrvdev_inst* inst) {
     // --------------------------------------------------------
 
     // Prase the request method
+    inst->req_method_str = inst->req_buf + i;
     if (inst->req_buf[i + 0] == 'G' &&
         inst->req_buf[i + 1] == 'E' &&
         inst->req_buf[i + 2] == 'T'
@@ -220,9 +223,10 @@ static bool parse_req(struct httpsrvdev_inst* inst) {
     } else {
         goto parse_err;
     }
-    if (inst->req_buf[i++] != ' ') {
+    if (inst->req_buf[i] != ' ') {
         goto parse_err;
     }
+    inst->req_buf[i++] = '\0';
 
     // Parse the request target, e.g. the URL to the dev server
     inst->req_target = inst->req_buf + i;
@@ -371,6 +375,8 @@ bool httpsrvdev_res_end(struct httpsrvdev_inst* inst) {
 }
 
 bool httpsrvdev_res_status_line(struct httpsrvdev_inst* inst, int status) {
+    inst->res_status = status;
+
     if (!httpsrvdev_res_send(inst, "HTTP/1.1 ")) return false;
     char* status_buf = same_scope_tmp_alloc(inst, 8);
     sprintf(status_buf, "%d", status);

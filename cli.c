@@ -421,14 +421,16 @@ int main(int argc_local, char* argv_local[]) {
                         ) {
                             strcpy(inst.root_path, "");
                             res_with_path_or_err(abs_route);
-                            goto next_main_loop_iter;
+                            goto main_loop_iter_end;
                         }
                     }
 
                     res_with_err_page_from_status(404);
                 }
             }
-            next_main_loop_iter: continue;
+        main_loop_iter_end: 
+            log_fmt(INFO, "%s %s %d", inst.req_method_str, inst.req_target, inst.res_status);
+            continue;
         }
     }; httpsrvdev_stop(&inst);
 

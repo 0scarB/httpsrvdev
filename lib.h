@@ -50,10 +50,14 @@ struct httpsrvdev_inst {
     char   req_buf[2048];
     size_t req_len;
     int    req_method;
+    char*  req_method_str;
     char*  req_target;
     char*  req_headers[128][2];
     int    req_headers_count;
     char*  req_body;
+
+    // Response stuff
+    int res_status;
 
     char* default_file_mime_type;
 
