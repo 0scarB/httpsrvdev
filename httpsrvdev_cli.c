@@ -182,7 +182,7 @@ void handle_cli_args() {
         "Serve files and directories via HTTP.\n"
         "For non-deployment (a.k.a. non-production) software development.\n"
         "\n"
-        "[SRC1 SRC2 ...] .... A list of 0 or more sources. A source may"
+        "[SRC1 SRC2 ...] .... A list of 0 or more sources. A source may\n"
         "                     a) be the path to a file or a directory\n"
         "                     b) be \"-\", as a placeholder for the standard input.\n"
         "                           If 0 sources are provided, the CWD (current \n"
