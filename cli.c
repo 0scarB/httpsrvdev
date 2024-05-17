@@ -345,7 +345,9 @@ int main(int argc_local, char* argv_local[]) {
 
     // Run file server
     httpsrvdev_start(&inst); {
-        log_fmt(INFO, "Listening...");
+        log_fmt(INFO, "Listening on http://%d.%d.%d.%d:%d...",
+                (inst.ip>>24)&0xFF, (inst.ip>>16)&0xFF, (inst.ip>>8)&0xFF, (inst.ip>>0)&0xFF,
+                inst.port);
 
         size_t abs_route_buf_len = 512;
         char   abs_route[abs_route_buf_len];
