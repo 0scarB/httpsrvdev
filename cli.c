@@ -349,13 +349,17 @@ int main(int argc_local, char* argv_local[]) {
         char   abs_route[abs_route_buf_len];
         char*  rel_route = abs_route + 1;
         // Main loop
-        while (httpsrvdev_res_begin(&inst)) {
-            {
-                printf("req_target='%s'\n", inst.req_target);
-                for (size_t i = 0; i < inst.req_headers_count; ++i) {
-                    printf("req_header='%s:%s'\n", inst.req_headers[i][0], inst.req_headers[i][1]);
-                }
-                printf("req_body='%s'\n", inst.req_body);
+        while (true) {
+            while (!httpsrvdev_res_begin(&inst)) {
+                // Request parsing intermittently fails here when a request finishes
+                // after another one has been started -- e.g. when switching back
+                // and forth between a page and a directory listing. This is possibly
+                // some sort of race condition because we're handling requests
+                // synchronously or an implementation error.
+                // It hasn't prevented any functionality yet and would probably take
+                // a bit of time to diagnose so I'm not going to look into it yet.
+                // TODO: Diagnose later
+                // TODO: Log warning
             }
 
             // Set the "route" from the HTTP target
@@ -428,6 +432,6 @@ int main(int argc_local, char* argv_local[]) {
         }
     }; httpsrvdev_stop(&inst);
 
-    return EXIT_SUCCESS;
+    return EXIT_FAILURE;
 }
 

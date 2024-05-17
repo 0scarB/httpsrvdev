@@ -358,8 +358,12 @@ bool httpsrvdev_res_end(struct httpsrvdev_inst* inst) {
     if (inst->conn_sock_fd != -1) {
         // Flush socket buffer by shutting down write... Not documented in
         // manpage :(
-        shutdown(inst->conn_sock_fd, SHUT_WR);
-        close(inst->conn_sock_fd);
+        if (shutdown(inst->conn_sock_fd, SHUT_RDWR) == -1) {
+            return false;
+        }
+        if (close(inst->conn_sock_fd) == -1) {
+            return false;
+        }
     }
     inst->conn_sock_fd = -1;
 
