@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include "lib.h"
 
@@ -386,6 +387,19 @@ int main(int argc_local, char* argv_local[]) {
                             char* path = src;
                             char resolved_path[512];
                             realpath(path, resolved_path);
+
+                            // Add trailing '/' to resolved path if it's a path
+                            // to a directory. This ensures that the path will
+                            // be added to the URL
+                            struct stat path_stat;
+                            if (stat(resolved_path, &path_stat) != -1 &&
+                                (path_stat.st_mode & S_IFMT) == S_IFDIR
+                            ) {
+                                size_t path_len = strlen(resolved_path);
+                                resolved_path[path_len    ] = '/';
+                                resolved_path[path_len + 1] = '\0';
+                            }
+
                             httpsrvdev_res_listing_entry(&inst, resolved_path, path);
                         }
                     }

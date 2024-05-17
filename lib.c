@@ -1069,6 +1069,7 @@ bool httpsrvdev_res_file(struct httpsrvdev_inst* inst, char* path) {
 static char* index_files[] = {"/index.html", "index.htm"};
 
 bool httpsrvdev_res_dir(struct httpsrvdev_inst* inst, char* dir_path) {
+    // Respond with the index.htm(l) file of existent in the directory
     for (size_t i = 0; i < sizeof(index_files)/sizeof(index_files[0]); ++i) {
         char* index_file_path = same_scope_tmp_alloc(inst, 1024);
         strcpy(stpcpy(index_file_path, dir_path), index_files[i]);
@@ -1081,6 +1082,8 @@ bool httpsrvdev_res_dir(struct httpsrvdev_inst* inst, char* dir_path) {
         return httpsrvdev_res_file(inst, index_file_path);
     }
 
+    // Construct buffer containing "<dir_path>/" that will act as the prefix
+    // for the path to each directory entry
     char entry_path_buf[1024];
     if (!path_with_root_to_path_rel_to_root(inst, dir_path, entry_path_buf))
         return false;
@@ -1090,6 +1093,7 @@ bool httpsrvdev_res_dir(struct httpsrvdev_inst* inst, char* dir_path) {
         ++entry_name_in_path_start;
     }
 
+    // Create the directory listing
     httpsrvdev_res_listing_begin(inst);
     struct dirent** entries;
     int n_entries = scandir(dir_path, &entries, NULL, alphasort);
@@ -1098,8 +1102,15 @@ bool httpsrvdev_res_dir(struct httpsrvdev_inst* inst, char* dir_path) {
         return false;
     }
     for (size_t i = 0; i < n_entries; ++i) {
-        char* entry_name = entries[i]->d_name;
-        strcpy(entry_name_in_path_start, entry_name);
+        struct dirent* entry = entries[i];
+        char* entry_name = entry->d_name;
+        char* path_end = stpcpy(entry_name_in_path_start, entry_name);
+        // Add trailing '/' to entry path if it's a directory.
+        // This ensures that the directory is kept in URL.
+        if (entry->d_type == DT_DIR) {
+            *(path_end++) = '/';
+            *path_end = '\0';
+        }
         httpsrvdev_res_listing_entry(inst, entry_path_buf, entry_name);
     }
     httpsrvdev_res_listing_end(inst);
