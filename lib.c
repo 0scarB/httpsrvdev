@@ -56,6 +56,12 @@ struct httpsrvdev_inst httpsrvdev_init_begin() {
         .listen_sock_fd = -1,
         .  conn_sock_fd = -1,
 
+        .req_len = 0,
+        .req_method = -1,
+        .req_target = NULL,
+        .req_headers_count = 0,
+        .req_body = "",
+
         .default_file_mime_type = "\0",
 
         .root_path = ".",
@@ -69,6 +75,7 @@ struct httpsrvdev_inst httpsrvdev_init_begin() {
 }
 
 static void* same_scope_tmp_alloc(struct httpsrvdev_inst* inst, size_t size) {
+    // TODO: Memory allignment
     size_t alloc_end_offset = inst->same_scope_tmp_mem_alloc_offset + size;
     void* ptr;
     // Increment if end of allocation is withing memory region size;
@@ -120,22 +127,6 @@ bool httpsrvdev_stop(struct httpsrvdev_inst* inst) {
     }
     close(inst->listen_sock_fd);
 
-    return true;
-}
-
-bool httpsrvdev_req_slice_copy_to_buf(struct httpsrvdev_inst* inst,
-    uint16_t(*slice)[2],
-    char*  dst_buf,
-    size_t dst_buf_len
-) {
-    size_t len = (*slice)[1];
-    if (len > dst_buf_len - 1) {
-        inst->err = httpsrvdev_BUF_TOO_SMALL;
-        return false;
-    }
-
-    strncpy(dst_buf, inst->req_buf + (*slice)[0], len - 1);
-    dst_buf[len - 1] = '\0';
     return true;
 }
 
@@ -234,9 +225,19 @@ static bool parse_req(struct httpsrvdev_inst* inst) {
     }
 
     // Parse the request target, e.g. the URL to the dev server
-    inst->req_target_slice[0] = i;
+    inst->req_target = inst->req_buf + i;
     while (inst->req_buf[i++] != ' ') {}
-    inst->req_target_slice[1] = i - inst->req_target_slice[0];
+    inst->req_buf[i - 1] = '\0';
+
+    // As seen above we store `char*` pointers to substrings of `inst->req_buf`
+    // in `inst` and manually insert '\0' null terminators to end the substrings.
+    // This means that you can directly access a requests target -- normally the
+    // page route -- via the `inst->req_target` pointer, e.g.:
+    //
+    //     char* page_route = inst->req_target;
+    //
+    // This pattern is repeated for other important request substrings such as
+    // header names and values; see below.
 
     // Parse 'HTTP1.(1|0) '
     if (inst->req_buf[i++] != 'H' ||
@@ -270,14 +271,14 @@ static bool parse_req(struct httpsrvdev_inst* inst) {
     while (inst->req_buf[i] != '\r' && inst->req_buf[i + 1] != '\n') {
 
         // Parse header name
-        inst->req_header_slices[inst->req_headers_count][0][0] = i;
+        inst->req_headers[inst->req_headers_count][0] = inst->req_buf + i;
         while (true) {
             ++i;
             if (inst->req_buf[i] == ':') {
-                inst->req_header_slices[inst->req_headers_count][0][1] = i;
+                inst->req_buf[i] = '\0';
                 break;
             } else if (inst->req_buf[i] == ' ') {
-                inst->req_header_slices[inst->req_headers_count][0][1] = i;
+                inst->req_buf[i] = '\0';
                 if (inst->req_buf[++i] != ':') {
                     goto parse_err;
                 }
@@ -289,9 +290,9 @@ static bool parse_req(struct httpsrvdev_inst* inst) {
         if (inst->req_buf[i++] != ' ') {
             goto parse_err;
         }
-        inst->req_header_slices[inst->req_headers_count][1][0] = i;
+        inst->req_headers[inst->req_headers_count][1] = inst->req_buf + i;
         while (inst->req_buf[i++] != '\r') {}
-        inst->req_header_slices[inst->req_headers_count][1][1] = i;
+        inst->req_buf[i - 1] = '\0';
         if (inst->req_buf[i++] != '\n') {
             goto parse_err;
         }
@@ -304,8 +305,15 @@ static bool parse_req(struct httpsrvdev_inst* inst) {
     // Parse request body
     // --------------------------------------------------------
 
-    inst->req_body_slice[0] = i;
-    inst->req_body_slice[1] = inst->req_len;
+    inst->req_body = inst->req_buf + i;
+    if (inst->req_buf[inst->req_len - 2] == '\r' &&
+        inst->req_buf[inst->req_len - 1] == '\n'
+    ) {
+        inst->req_buf[inst->req_len - 2] = '\0';
+    } else {
+        // TODO: Maybe this case should be an error?
+        inst->req_buf[inst->req_len] = '\0';
+    }
 
     // --------------------------------------------------------
 
@@ -348,10 +356,9 @@ bool httpsrvdev_res_end(struct httpsrvdev_inst* inst) {
     if (!httpsrvdev_res_send_n(inst, "\r\n", 2)) return false;
 
     if (inst->conn_sock_fd != -1) {
-        // Shutdown seems to be required before close for large files
-        // that require multiple write calls.
-        // TODO: Investigate why. Is this intended behaviour? Is it bad for performance?
-        shutdown(inst->conn_sock_fd, SHUT_RDWR);
+        // Flush socket buffer by shutting down write... Not documented in
+        // manpage :(
+        shutdown(inst->conn_sock_fd, SHUT_WR);
         close(inst->conn_sock_fd);
     }
     inst->conn_sock_fd = -1;
@@ -379,7 +386,8 @@ bool httpsrvdev_res_header(struct httpsrvdev_inst* inst, char* name, char* value
 }
 
 bool httpsrvdev_res_headerf(struct httpsrvdev_inst* inst, char* name, char* fmt, ...) {
-    char* str_buf = same_scope_tmp_alloc(inst, 1024);
+    char str_buf[1024];
+    SPRINTF_TO_STR_FROM_FMT_AND_VARGS;
     return httpsrvdev_res_header(inst, name, str_buf);
 }
 

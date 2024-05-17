@@ -47,13 +47,13 @@ struct httpsrvdev_inst {
     size_t             listen_sock_addr_size;
 
     // Request stuff
-    char     req_buf[2048];
-    size_t   req_len;
-    int      req_method;
-    uint16_t req_target_slice         [2];
-    uint16_t req_header_slices[128][2][2];
-    int      req_headers_count;
-    uint16_t req_body_slice           [2];
+    char   req_buf[2048];
+    size_t req_len;
+    int    req_method;
+    char*  req_target;
+    char*  req_headers[128][2];
+    int    req_headers_count;
+    char*  req_body;
 
     char* default_file_mime_type;
 
@@ -69,9 +69,6 @@ struct httpsrvdev_inst httpsrvdev_init_begin();
 bool     httpsrvdev_init_end               (struct httpsrvdev_inst* inst);
 bool     httpsrvdev_start                  (struct httpsrvdev_inst* inst);
 bool     httpsrvdev_stop                   (struct httpsrvdev_inst* inst);
-bool     httpsrvdev_req_slice_copy_to_buf  (struct httpsrvdev_inst* inst,
-                                                uint16_t(*slice)[2],
-                                                char* dst_buf, size_t dst_buf_len);
 bool     httpsrvdev_res_begin              (struct httpsrvdev_inst* inst);
 bool     httpsrvdev_res_send_n             (struct httpsrvdev_inst* inst,
                                                 char* str, size_t n);
@@ -104,7 +101,6 @@ bool     httpsrvdev_res_listing_entry      (struct httpsrvdev_inst* inst,
                                                 char* path, char* link_text);
 bool     httpsrvdev_res_listing_end        (struct httpsrvdev_inst* inst);
 uint64_t httpsrvdev_file_encode_ext        (struct httpsrvdev_inst* inst, char* file_path);
-char*    httpsrvdev_file_mime_type         (struct httpsrvdev_inst* inst, char* file_path);
 bool     httpsrvdev_ipv4_from_str          (struct httpsrvdev_inst* inst, char* str);
 int64_t  httpsrvdev_ipv4_parse             (struct httpsrvdev_inst* inst, char* str);
 bool     httpsrvdev_port_from_str          (struct httpsrvdev_inst* inst, char* str);

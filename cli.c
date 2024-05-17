@@ -349,12 +349,18 @@ int main(int argc_local, char* argv_local[]) {
         char*  rel_route = abs_route + 1;
         // Main loop
         while (httpsrvdev_res_begin(&inst)) {
+            {
+                printf("req_target='%s'\n", inst.req_target);
+                for (size_t i = 0; i < inst.req_headers_count; ++i) {
+                    printf("req_header='%s:%s'\n", inst.req_headers[i][0], inst.req_headers[i][1]);
+                }
+                printf("req_body='%s'\n", inst.req_body);
+            }
+
             // Set the "route" from the HTTP target
             //    TODO: Add proper target parsing
             //    TODO: HTTP error response when slice is larger than route_buf_len
-            httpsrvdev_req_slice_copy_to_buf(
-                    &inst, &inst.req_target_slice,
-                    abs_route, abs_route_buf_len);
+            strcpy(abs_route, inst.req_target);
 
             if (srcs_count == 1) {
                 bool src_is_stdin = srcs[0][0] == '-' && srcs[0][1] == '\0';
