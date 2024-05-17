@@ -8,7 +8,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "lib.h"
+#include "httpsrvdev_lib.h"
 
 // Resources:
 //     HTTP Semantics   : https://datatracker.ietf.org/doc/html/rfc9110

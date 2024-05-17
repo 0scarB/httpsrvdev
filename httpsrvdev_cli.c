@@ -6,7 +6,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "lib.h"
+#include "httpsrvdev_lib.h"
 
 #define INFO 1
 #define WARN 2

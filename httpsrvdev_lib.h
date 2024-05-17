@@ -1,3 +1,6 @@
+#ifndef HTTPSRVDEV_H
+#define HTTPSRVDEV_H
+
 #include <netinet/in.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -110,3 +113,4 @@ int64_t  httpsrvdev_ipv4_parse             (struct httpsrvdev_inst* inst, char* 
 bool     httpsrvdev_port_from_str          (struct httpsrvdev_inst* inst, char* str);
 int      httpsrvdev_port_parse             (struct httpsrvdev_inst* inst, char* str);
 
+#endif // HTTPSRVDEV_H
