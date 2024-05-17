@@ -237,11 +237,12 @@ void handle_cli_args() {
     if (ip_opt_idx != -1) {
         int ip_val_idx = ip_opt_idx + 1;
         if (ip_val_idx >= argc) {
-            // TODO: Error message
+            log_(ERR, "No value provided after --ip!");
             exit(1);
         }
-        if (!httpsrvdev_ipv4_from_str(&inst, argv[ip_val_idx])) {
-            // TODO: Error message
+        char* ipv4_addr_str = argv[ip_val_idx];
+        if (!httpsrvdev_ipv4_from_str(&inst, ipv4_addr_str)) {
+            log_fmt(ERR, "Failed to parse IPv4 address '%s'!", ipv4_addr_str);
             exit(1);
         }
         argv_handled[ip_opt_idx] = true;
@@ -253,11 +254,12 @@ void handle_cli_args() {
     if (port_opt_idx != -1) {
         int port_val_idx = port_opt_idx + 1;
         if (port_val_idx >= argc) {
-            // TODO: Error message
+            log_fmt(ERR, "No value provided after %s!", argv[port_opt_idx]);
             exit(1);
         }
-        if (!httpsrvdev_port_from_str(&inst, argv[port_val_idx])) {
-            // TODO: Error message
+        char* port_str = argv[port_val_idx];
+        if (!httpsrvdev_port_from_str(&inst, port_str)) {
+            log_fmt(ERR, "Failed to parse port %s!", port_str);
             exit(1);
         }
         argv_handled[port_opt_idx] = true;
@@ -269,7 +271,7 @@ void handle_cli_args() {
     if (stdin_mime_type_opt_idx != -1) {
         int stdin_mime_type_val_idx = stdin_mime_type_opt_idx + 1;
         if (stdin_mime_type_val_idx >= argc) {
-            // TODO: Error message
+            log_(ERR, "No standard input MIME type value provided after --stdin-type!");
             exit(1);
         }
         stdin_mime_type = argv[stdin_mime_type_val_idx];
