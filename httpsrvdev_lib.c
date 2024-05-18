@@ -412,6 +412,13 @@ bool httpsrvdev_res_body(struct httpsrvdev_inst* inst, char* body) {
     return true;
 }
 
+bool httpsrvdev_resolve_file_path(struct httpsrvdev_inst* inst,
+    char* path, char* resolved_path
+) {
+    strcpy(resolved_path, path);
+    return true;
+}
+
 static bool path_rel_to_root_to_path_with_root(struct httpsrvdev_inst* inst,
     char* path, char* result_path
 ) {
@@ -1350,16 +1357,86 @@ err:
 #include "test_framework.h"
 
 void test_suite(void) {
-    test_begin("Example grouping"); {
-        test_begin("Test 1."); {
-            int a = -1;
-            int b = 1;
-            test_assert(a == b, "%d != %d", a, b);
+    test_begin("httpsrvdev_resolve_file_path"); {
+        test_begin("with inst->root_path == \".\""); {
+            struct httpsrvdev_inst inst = httpsrvdev_init_begin();
+            strcpy(inst.root_path, ".");
+
+            char in_to_expected[][2][1024] = {
+                {""                     , "."             },
+                {"."                    , "."             },
+                {"./"                   , "."             },
+                {"lvl1/.."              , "."             },
+                {"./lvl1/.."            , "."             },
+                {"./lvl1/../"           , "."             },
+                {"./lvl1/../."          , "."             },
+                {".."                   , ".."            },
+                {"../"                  , ".."            },
+                {"../."                 , ".."            },
+                {"./../."               , ".."            },
+                {"./../lvl0/.."         , ".."            },
+                {"lvl1"                 , "./lvl1"        },
+                {"./lvl1"               , "./lvl1"        },
+                {"lvl1/"                , "./lvl1"        },
+                {"lvl1/."               , "./lvl1"        },
+                {"lvl1/./"              , "./lvl1"        },
+                {"./lvl1/lvl2/.."       , "./lvl1"        },
+                {"./lvl1/./lvl2/.."     , "./lvl1"        },
+                {"./lvl11/../lvl12"     , "./lvl12"       },
+                {"./lvl11/../lvl12/"    , "./lvl12"       },
+                {"./lvl11/../lvl12/."   , "./lvl12"       },
+                {"lvl1/lvl2"            , "./lvl1/lvl2"   },
+                {"./lvl1/lvl2"          , "./lvl1/lvl2"   },
+                {"./lvl1/./lvl2"        , "./lvl1/lvl2"   },
+                {"./lvl1/lvl2/../lvl2"  , "./lvl1/lvl2"   },
+                {"../.."                , "../.."         },
+                {"/some/abs/path"       , "/some/abs/path"},
+                {"/some/abs/path/"      , "/some/abs/path"},
+                {"/some/x/../abs/./path", "/some/abs/path"},
+            };
+            for (size_t i = 0;
+                i < sizeof(in_to_expected)/sizeof(in_to_expected[0]);
+                ++i
+            ) {
+                char* path_input             = in_to_expected[i][0];
+                char* resolved_path_expected = in_to_expected[i][1];
+                char  resolved_path_actual[512];
+                httpsrvdev_resolve_file_path(&inst, path_input, resolved_path_actual);
+                test_assert(strcmp(resolved_path_expected, resolved_path_actual) == 0,
+                        "Failed to resolve path '%s'! "
+                        "Expected '%s'; got '%s'.",
+                        path_input, resolved_path_expected, resolved_path_actual);
+            }
         }; test_end();
-        test_begin("Test 2."); {
-            size_t a = 3;
-            size_t b = 4;
-            test_assert(a == b, "%zu != %zu", a, b);
+        test_begin("with inst->root_path == \"/home/user\""); {
+            struct httpsrvdev_inst inst = httpsrvdev_init_begin();
+            strcpy(inst.root_path, "/home/user");
+
+            char in_to_expected[][2][1024] = {
+                {"."                    , "/home/user"     },
+                {".."                   , "/home"          },
+                {"../.."                , "/"              },
+                {"../user2"             , "home/user2"     },
+                {"../user2/.././"       , "/home"          },
+                {"lvl1"                 , "/home/user/lvl1"},
+                {"lvl1/./../lvl2/."     , "/home/user/lvl2"},
+                {"/some/abs/path"       , "/some/abs/path" },
+                {"/some/abs/path/"      , "/some/abs/path" },
+                {"/some/x/../abs/./path", "/some/abs/path" },
+            };
+            for (size_t i = 0;
+                i < sizeof(in_to_expected)/sizeof(in_to_expected[0]);
+                ++i
+            ) {
+                char* path_input             = in_to_expected[i][0];
+                char* resolved_path_expected = in_to_expected[i][1];
+                char  resolved_path_actual[512];
+                httpsrvdev_resolve_file_path(&inst, path_input, resolved_path_actual);
+                test_assert(strcmp(resolved_path_expected, resolved_path_actual) == 0,
+                        "Failed to resolve path '%s'! "
+                        "Expected '%s'; got '%s'.",
+                        path_input, resolved_path_expected, resolved_path_actual);
+            }
         }; test_end();
     }; test_end();
 }
@@ -1372,3 +1449,4 @@ int main(void) {
 }
 
 #endif // TEST
+
