@@ -1344,3 +1344,31 @@ err:
 //     2. Are there better alternatives
 // - Replace "while true" loops with bounded loops
 
+// ======================================================================
+#ifdef TEST
+
+#include "test_framework.h"
+
+void test_suite(void) {
+    test_begin("Example grouping"); {
+        test_begin("Test 1."); {
+            int a = -1;
+            int b = 1;
+            test_assert(a == b, "%d != %d", a, b);
+        }; test_end();
+        test_begin("Test 2."); {
+            size_t a = 3;
+            size_t b = 4;
+            test_assert(a == b, "%zu != %zu", a, b);
+        }; test_end();
+    }; test_end();
+}
+
+int main(void) {
+    test_suite();
+    if (!test_write_results_and_return_true_on_success(STDOUT_FILENO, STDERR_FILENO))
+        return EXIT_FAILURE;
+    return EXIT_SUCCESS;
+}
+
+#endif // TEST
