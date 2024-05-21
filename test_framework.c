@@ -41,12 +41,12 @@ void test_begin(char* group_description) {
 }
 
 void test_end(void) {
+    --test_stack_depth;
     if (test_stack[test_stack_depth]->type != test_NODE_GROUP_SUCCESS) {
         for (int i = test_stack_depth - 1; i > -1; --i) {
             test_stack[i]->type = test_NODE_GROUP_FAILED;
         }
     }
-    --test_stack_depth;
 }
 
 bool test_write_results_and_return_true_on_success(int out_fd, int err_fd) {
@@ -82,10 +82,13 @@ void test_assert(bool condition, char* fmt, ...) {
     if (condition) return;
 
     test_node_add(test_NODE_ASSERT_FAILED);
+    ++test_stack_depth;
 
     va_list  sprintf_args;
     va_start(sprintf_args, fmt);
     vsprintf(test_added_node->msg, fmt, sprintf_args);
     va_end  (sprintf_args);
+
+    test_end();
 }
 

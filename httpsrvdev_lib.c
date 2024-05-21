@@ -412,10 +412,104 @@ bool httpsrvdev_res_body(struct httpsrvdev_inst* inst, char* body) {
     return true;
 }
 
-bool httpsrvdev_resolve_file_path(struct httpsrvdev_inst* inst,
-    char* path, char* resolved_path
+struct masked_path_state {
+    char*  path;
+    bool*  masked;
+    size_t len;
+    int    idx;
+};
+
+bool httpsrvdev_file_sys_normalize_path(struct httpsrvdev_inst* inst,
+    char* path, char* normalized_path
 ) {
-    strcpy(resolved_path, path);
+    char full_path[strlen(path) + strlen(inst->root_path) + 1];
+
+    // Create `full_path` by joining `inst->root_path` and `path`
+    if (path[0] == '/') {
+        // Ingnore `inst->root_path` if `path` is absolute
+        strcpy(full_path, path);
+    } else {
+        char* join_ptr = stpcpy(full_path, inst->root_path);
+        if (*(join_ptr - 1) != '/') {
+            *(join_ptr++) = '/';
+        }
+        strcpy(join_ptr, path);
+    }
+    bool is_abs = full_path[0] == '/';
+
+    // Normalize by tracking the indices at which path segments start within the
+    // normalized path.
+    // Additionally, we not now many preceeding '../' segments should be prepended
+    // after this step.
+    size_t segment_start_stack[32];
+    size_t segment_start_stack_size = 0;
+    size_t preceeding_double_dot_segements_n = 0;
+    size_t full_path_len = strlen(full_path);
+    size_t full_path_idx = 0;
+    size_t norm_path_idx = 0;
+    while (full_path_idx < full_path_len) {
+        // Push the current segment start onto the stack
+        segment_start_stack[segment_start_stack_size++] = norm_path_idx;
+        if ( full_path[full_path_idx    ] == '.' &&
+            (full_path[full_path_idx + 1] == '/' || full_path_idx + 1 >= full_path_len)
+        ) {
+            // When a './' (or '.<EOL>) segment is encountered, pop it off the stack
+            norm_path_idx = segment_start_stack[--segment_start_stack_size];
+            full_path_idx += 2;
+        } else if (
+             full_path[full_path_idx    ] == '.' &&
+             full_path[full_path_idx + 1] == '.' &&
+            (full_path[full_path_idx + 2] == '/' || full_path_idx + 2 >= full_path_len)
+        ) {
+            // When a '../' (or '..<EOL>) segment is encountered, pop it off the stack
+            // AND pop the previous segment off the stack if existent
+            // OR increment the preceeding '../' counter if no previous segment exists
+            norm_path_idx = segment_start_stack[--segment_start_stack_size];
+            if (segment_start_stack_size == 0) {
+                ++preceeding_double_dot_segements_n;
+            } else {
+                norm_path_idx = segment_start_stack[--segment_start_stack_size];
+            }
+            full_path_idx += 3;
+        } else {
+            // Copy the current segment of `full_path` to `normalized_path`
+            while (full_path[full_path_idx] != '/' && full_path_idx < full_path_len) {
+                normalized_path[norm_path_idx++] = full_path[full_path_idx];
+                ++full_path_idx;
+            };
+            normalized_path[norm_path_idx++] = '/';
+            ++full_path_idx;
+        }
+    }
+
+    size_t norm_path_len = norm_path_idx;
+    // Prepend the `normalized_path` with the preceeding '../'s 
+    if (preceeding_double_dot_segements_n > 0) {
+        if (is_abs) return false;
+
+        size_t double_dots_prefix_len = 3*preceeding_double_dot_segements_n;
+        memcpy(normalized_path + double_dots_prefix_len,
+                normalized_path, norm_path_len + 1);
+        char* ptr = normalized_path;
+        for (size_t i = 0; i < preceeding_double_dot_segements_n; ++i) {
+            *(ptr++) = '.';
+            *(ptr++) = '.';
+            *(ptr++) = '/';
+        }
+        norm_path_len += double_dots_prefix_len;
+    // otherwise; prepend relative paths with './'
+    } else if (!is_abs) {
+        memcpy(normalized_path + 2, normalized_path, norm_path_len + 1);
+        normalized_path[0] = '.';
+        normalized_path[1] = '/';
+        norm_path_len += 2;
+    }
+    // Remove the last trailing '/' from `normalized_path`
+    if (norm_path_len > 1 && normalized_path[norm_path_len - 1] == '/') {
+        norm_path_len -= 1;
+    }
+    normalized_path[norm_path_len] = '\0';
+
     return true;
 }
 
@@ -1357,7 +1451,7 @@ err:
 #include "test_framework.h"
 
 void test_suite(void) {
-    test_begin("httpsrvdev_resolve_file_path"); {
+    test_begin("httpsrvdev_file_sys_normalize_path"); {
         test_begin("with inst->root_path == \".\""); {
             struct httpsrvdev_inst inst = httpsrvdev_init_begin();
             strcpy(inst.root_path, ".");
@@ -1398,14 +1492,15 @@ void test_suite(void) {
                 i < sizeof(in_to_expected)/sizeof(in_to_expected[0]);
                 ++i
             ) {
-                char* path_input             = in_to_expected[i][0];
-                char* resolved_path_expected = in_to_expected[i][1];
-                char  resolved_path_actual[512];
-                httpsrvdev_resolve_file_path(&inst, path_input, resolved_path_actual);
-                test_assert(strcmp(resolved_path_expected, resolved_path_actual) == 0,
+                char* path_input               = in_to_expected[i][0];
+                char* normalized_path_expected = in_to_expected[i][1];
+                char  normalized_path_actual[512];
+                httpsrvdev_file_sys_normalize_path(
+                        &inst, path_input, normalized_path_actual);
+                test_assert(strcmp(normalized_path_expected, normalized_path_actual) == 0,
                         "Failed to resolve path '%s'! "
                         "Expected '%s'; got '%s'.",
-                        path_input, resolved_path_expected, resolved_path_actual);
+                        path_input, normalized_path_expected, normalized_path_actual);
             }
         }; test_end();
         test_begin("with inst->root_path == \"/home/user\""); {
@@ -1416,7 +1511,7 @@ void test_suite(void) {
                 {"."                    , "/home/user"     },
                 {".."                   , "/home"          },
                 {"../.."                , "/"              },
-                {"../user2"             , "home/user2"     },
+                {"../user2"             , "/home/user2"    },
                 {"../user2/.././"       , "/home"          },
                 {"lvl1"                 , "/home/user/lvl1"},
                 {"lvl1/./../lvl2/."     , "/home/user/lvl2"},
@@ -1428,14 +1523,38 @@ void test_suite(void) {
                 i < sizeof(in_to_expected)/sizeof(in_to_expected[0]);
                 ++i
             ) {
-                char* path_input             = in_to_expected[i][0];
-                char* resolved_path_expected = in_to_expected[i][1];
-                char  resolved_path_actual[512];
-                httpsrvdev_resolve_file_path(&inst, path_input, resolved_path_actual);
-                test_assert(strcmp(resolved_path_expected, resolved_path_actual) == 0,
+                char* path_input               = in_to_expected[i][0];
+                char* normalized_path_expected = in_to_expected[i][1];
+                char  normalized_path_actual[512];
+                httpsrvdev_file_sys_normalize_path(
+                        &inst, path_input, normalized_path_actual);
+                test_assert(strcmp(normalized_path_expected, normalized_path_actual) == 0,
                         "Failed to resolve path '%s'! "
                         "Expected '%s'; got '%s'.",
-                        path_input, resolved_path_expected, resolved_path_actual);
+                        path_input, normalized_path_expected, normalized_path_actual);
+            }
+        }; test_end();
+        test_begin("with inst->root_path == \"a/b\""); {
+            struct httpsrvdev_inst inst = httpsrvdev_init_begin();
+            strcpy(inst.root_path, "a/b");
+
+            char in_to_expected[][2][1024] = {
+                {"../../a"  , "./a"  },
+                {"../../a/b", "./a/b"},
+            };
+            for (size_t i = 0;
+                i < sizeof(in_to_expected)/sizeof(in_to_expected[0]);
+                ++i
+            ) {
+                char* path_input               = in_to_expected[i][0];
+                char* normalized_path_expected = in_to_expected[i][1];
+                char  normalized_path_actual[512];
+                httpsrvdev_file_sys_normalize_path(
+                        &inst, path_input, normalized_path_actual);
+                test_assert(strcmp(normalized_path_expected, normalized_path_actual) == 0,
+                        "Failed to resolve path '%s'! "
+                        "Expected '%s'; got '%s'.",
+                        path_input, normalized_path_expected, normalized_path_actual);
             }
         }; test_end();
     }; test_end();
